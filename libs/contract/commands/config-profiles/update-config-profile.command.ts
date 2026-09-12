@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { CONFIG_PROFILES_ROUTES, REST_API } from '../../api';
-import { getEndpointDetails } from '../../constants';
+import { CONFIG_PROFILE_CORE_TYPE, getEndpointDetails } from '../../constants';
 import { ConfigProfileSchema } from '../../models';
 
 export namespace UpdateConfigProfileCommand {
@@ -27,6 +27,9 @@ export namespace UpdateConfigProfileCommand {
             )
             .optional(),
         config: z.looseObject({}).optional(),
+        coreType: z
+            .enum([CONFIG_PROFILE_CORE_TYPE.XRAY, CONFIG_PROFILE_CORE_TYPE.SINGBOX])
+            .optional(),
     });
 
     export const ResponseSchema = z.object({

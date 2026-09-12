@@ -25,3 +25,5 @@ export * from './subscription-template';
 export * from './subscriptions';
 export * from './system';
 export * from './users';
+export * from './speed-limits';
+export * from './user-routes';

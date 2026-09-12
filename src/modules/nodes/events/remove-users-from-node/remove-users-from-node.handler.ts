@@ -18,7 +18,7 @@ export class RemoveUsersFromNodeHandler implements IEventHandler<RemoveUsersFrom
     ) {}
     async handle(event: RemoveUsersFromNodeEvent) {
         try {
-            const nodes = await this.nodesRepository.findConnectedNodesWithoutInbounds();
+            const nodes = await this.nodesRepository.findConnectedNodes();
 
             if (nodes.length === 0 || event.users.length === 0) {
                 return;
@@ -32,9 +32,17 @@ export class RemoveUsersFromNodeHandler implements IEventHandler<RemoveUsersFrom
             };
 
             for (const node of nodes) {
+                if (node.activeInbounds.some((inbound) => inbound.type === 'socks')) {
+                    await this.nodesQueuesService.startNode({ nodeUuid: node.uuid });
+                    continue;
+                }
                 await this.nodesQueuesService.removeUsersFromNode({
                     data: userData,
-                    node: node.connectionOpts,
+                    node: {
+                        address: node.address,
+                        port: node.port,
+                        proxyUrl: node.proxyUrl,
+                    },
                 });
             }
 

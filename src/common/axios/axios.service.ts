@@ -39,11 +39,18 @@ import {
 import { prettyBytesUtil } from '@common/utils/bytes';
 import { deriveSni } from '@common/utils/certs';
 import { formatExecutionTime, getTime } from '@common/utils/get-elapsed-time';
+import { TConfigProfileCoreType } from '@libs/contracts/constants';
 
 import { GetNodeJwtCommand } from '@modules/keygen/commands/get-node-jwt';
 
 import { fail, ok, TResult } from '../types';
 import { INodeConnectionOpts, INodeRequestOpts, IMtlsOptions } from './axios.interfaces';
+import {
+    GOST_NODE_API,
+    GostForwardSyncRequest,
+    GostForwardSyncResponse,
+    GostHealthResponse,
+} from './gost-forward.contract';
 import { MtlsSocksProxyAgent } from './mtls-agent';
 
 const EMPTY_BODY: Readonly<Record<string, never>> = {};
@@ -51,6 +58,10 @@ const MAX_NODE_ERROR_LENGTH = 2000;
 const ZSTD_HEADERS: RawAxiosRequestHeaders = { 'Content-Encoding': 'zstd' };
 
 const zstdCompressAsync = promisify(zstdCompress);
+
+type TStartCoreRequest = StartXrayCommand.Request & {
+    coreType?: TConfigProfileCoreType;
+};
 
 const ZSTD_OPTIONS: ZstdOptions = {
     params: {
@@ -247,7 +258,7 @@ export class AxiosService {
      */
 
     public async startXray(
-        data: StartXrayCommand.Request,
+        data: TStartCoreRequest,
         opts: INodeConnectionOpts,
     ): Promise<TResult<StartXrayCommand.Response['response']>> {
         return this.request<StartXrayCommand.Response>({
@@ -278,6 +289,40 @@ export class AxiosService {
         return this.request<GetNodeHealthCheckCommand.Response>({
             label: 'GET NODE HEALTH',
             path: GetNodeHealthCheckCommand.url,
+            opts,
+            method: 'get',
+            logAxiosError: false,
+            timeout: 15_000,
+        });
+    }
+
+    public async stopSingBox(opts: INodeConnectionOpts): Promise<TResult<{ isStopped: boolean }>> {
+        return this.request<{ response: { isStopped: boolean } }>({
+            label: 'STOP SING-BOX',
+            path: '/node/core/singbox/stop',
+            opts,
+            method: 'get',
+        });
+    }
+
+    public async syncGostForwards(
+        data: GostForwardSyncRequest,
+        opts: INodeConnectionOpts,
+    ): Promise<TResult<GostForwardSyncResponse>> {
+        return this.request<{ response: GostForwardSyncResponse }>({
+            label: 'SYNC GOST FORWARDS',
+            path: GOST_NODE_API.syncForwards,
+            opts,
+            data,
+            logAxiosError: false,
+            timeout: 30_000,
+        });
+    }
+
+    public async getGostHealth(opts: INodeConnectionOpts): Promise<TResult<GostHealthResponse>> {
+        return this.request<{ response: GostHealthResponse }>({
+            label: 'GET GOST HEALTH',
+            path: GOST_NODE_API.health,
             opts,
             method: 'get',
             logAxiosError: false,

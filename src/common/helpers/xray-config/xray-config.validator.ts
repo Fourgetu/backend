@@ -25,7 +25,7 @@ import {
     SHADOWSOCKS_METHODS,
 } from './ss-cipher';
 
-const MANAGED_CLIENT_PROTOCOLS = new Set(['hysteria', 'shadowsocks', 'trojan', 'vless']);
+const MANAGED_CLIENT_PROTOCOLS = new Set(['hysteria', 'shadowsocks', 'socks', 'trojan', 'vless']);
 type ManagedInboundSettings = VLessInboundConfig | TrojanInboundConfig | ShadowsocksInboundConfig;
 
 const ALLOWED_PROTOCOLS = new Set([
@@ -34,6 +34,7 @@ const ALLOWED_PROTOCOLS = new Set([
     'hysteria',
     'mixed',
     'shadowsocks',
+    'socks',
     'trojan',
     'tun',
     'tunnel',
@@ -165,7 +166,16 @@ export class XRayConfig {
             if (!this.hasManagedClients(inbound)) continue;
 
             this.ensureSettings(inbound);
-            inbound.settings!.clients = [];
+            if (inbound.protocol === 'socks') {
+                const settings = inbound.settings as unknown as {
+                    accounts?: Array<{ user: string; pass: string }>;
+                    auth?: string;
+                };
+                settings.auth = 'password';
+                settings.accounts = [];
+            } else {
+                inbound.settings!.clients = [];
+            }
 
             if (injectFlow && inbound.protocol === 'vless') {
                 inbound.settings!.flow = getVlessFlow(inbound);
@@ -197,6 +207,8 @@ export class XRayConfig {
 
         return this.config;
     }
+
+    public finalizeInboundClients(): void {}
 
     private groupUsersByTag(
         users: UserForConfigEntity[],
@@ -283,6 +295,23 @@ export class XRayConfig {
                         ...(!isSS2022 && { method: method || 'chacha20-ietf-poly1305' }),
                         email: user.id.toString(),
                         id: user.vlessUuid,
+                    });
+                }
+                break;
+            }
+
+            case 'socks': {
+                if (!inbound.settings) inbound.settings = {};
+                const settings = inbound.settings as unknown as {
+                    accounts?: Array<{ user: string; pass: string }>;
+                    auth?: string;
+                };
+                settings.auth = 'password';
+                settings.accounts ??= [];
+                for (const user of users) {
+                    settings.accounts.push({
+                        user: user.socksUsername,
+                        pass: user.socksPassword,
                     });
                 }
                 break;

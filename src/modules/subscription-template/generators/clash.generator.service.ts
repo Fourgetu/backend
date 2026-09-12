@@ -109,7 +109,9 @@ export class ClashGeneratorService {
     }
 
     private resolveClashType(protocol: string): string {
-        return protocol === 'shadowsocks' ? 'ss' : protocol;
+        if (protocol === 'shadowsocks') return 'ss';
+        if (protocol === 'socks') return 'socks5';
+        return protocol;
     }
 
     private applyProtocolFields(node: ProxyNode, host: ResolvedProxyConfig): boolean {
@@ -121,6 +123,11 @@ export class ClashGeneratorService {
             case 'shadowsocks':
                 node.password = host.protocolOptions.password;
                 node.cipher = host.protocolOptions.method;
+                return true;
+
+            case 'socks':
+                node.username = host.protocolOptions.username;
+                node.password = host.protocolOptions.password;
                 return true;
 
             default:

@@ -80,6 +80,7 @@ interface ProxyNode {
     type: string;
     udp: boolean;
     uuid?: string;
+    username?: string;
     serverDescription?: string;
 }
 
@@ -222,7 +223,9 @@ export class MihomoGeneratorService {
     }
 
     private resolveClashType(protocol: string): string {
-        return protocol === 'shadowsocks' ? 'ss' : protocol;
+        if (protocol === 'shadowsocks') return 'ss';
+        if (protocol === 'socks') return 'socks5';
+        return protocol;
     }
 
     private applyProtocolFields(node: ProxyNode, host: ResolvedProxyConfig): boolean {
@@ -249,6 +252,11 @@ export class MihomoGeneratorService {
                 node.cipher = host.protocolOptions.method;
                 node['udp-over-tcp'] = host.protocolOptions.uot;
                 node['udp-over-tcp-version'] = host.protocolOptions.uotVersion;
+                return true;
+
+            case 'socks':
+                node.username = host.protocolOptions.username;
+                node.password = host.protocolOptions.password;
                 return true;
 
             default:

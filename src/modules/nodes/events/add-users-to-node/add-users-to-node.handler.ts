@@ -42,7 +42,9 @@ export class AddUsersToNodeHandler implements IEventHandler<AddUsersToNodeEvent>
             }
 
             const activeNodes = nodes.filter(
-                (node) => node.activeInbounds.length > 0 && node.activeConfigProfileUuid,
+                (node) =>
+                    node.activeInbounds.length > 0 &&
+                    (node.activeConfigProfileUuid || node.activeSingBoxConfigProfileUuid),
             );
 
             if (activeNodes.length === 0) return;
@@ -50,11 +52,30 @@ export class AddUsersToNodeHandler implements IEventHandler<AddUsersToNodeEvent>
             for (const node of activeNodes) {
                 const activeTags = new Set(node.activeInbounds.map((ib) => ib.tag));
 
-                const usersForNode: AddUsersToNodeCommandSdk.Request['users'] = [];
+                if (node.activeInbounds.some((inbound) => inbound.type === 'socks')) {
+                    await this.nodesQueuesService.startNode({ nodeUuid: node.uuid });
+                    continue;
+                }
+
+                const usersForNode: Array<{
+                    userData: AddUsersToNodeCommandSdk.Request['users'][number]['userData'] & {
+                        socksUsername: string;
+                        socksPassword: string;
+                    };
+                    inboundData: Array<{ type: string; tag: string; flow?: string }>;
+                }> = [];
                 const usersToRemove: Array<{ userId: string; hashUuid: string }> = [];
 
                 for (const user of usersResult.response) {
-                    const { id, trojanPassword, vlessUuid, ssPassword, inbounds } = user;
+                    const {
+                        id,
+                        trojanPassword,
+                        vlessUuid,
+                        ssPassword,
+                        socksUsername,
+                        socksPassword,
+                        inbounds,
+                    } = user;
 
                     if (inbounds.length === 0) continue;
 
@@ -72,6 +93,8 @@ export class AddUsersToNodeHandler implements IEventHandler<AddUsersToNodeEvent>
                             vlessUuid,
                             trojanPassword,
                             ssPassword,
+                            socksUsername,
+                            socksPassword,
                         },
                         inboundData: filteredInbounds.map((inbound) => {
                             const inboundType = this.resolveInboundType(inbound);
@@ -86,6 +109,9 @@ export class AddUsersToNodeHandler implements IEventHandler<AddUsersToNodeEvent>
                                         flow: getVlessFlowFromDbInbound(inbound),
                                     };
                                 case 'hysteria':
+                                case 'hysteria2':
+                                case 'anytls':
+                                case 'socks':
                                     return {
                                         type: inboundType,
                                         tag: inbound.tag,
@@ -108,7 +134,7 @@ export class AddUsersToNodeHandler implements IEventHandler<AddUsersToNodeEvent>
                         data: {
                             affectedInboundTags,
                             users: usersForNode,
-                        },
+                        } as unknown as AddUsersToNodeCommandSdk.Request,
                         node: { address: node.address, port: node.port, proxyUrl: node.proxyUrl },
                     });
                 }

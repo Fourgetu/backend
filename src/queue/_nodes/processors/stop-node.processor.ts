@@ -44,11 +44,16 @@ export class StopNodeProcessor extends WorkerHost {
                 return true;
             }
 
-            await this.axios.stopXray({
+            const connectionOpts = {
                 address: result.response.address,
                 port: result.response.port,
                 proxyUrl: result.response.proxyUrl,
-            });
+            };
+
+            await Promise.allSettled([
+                this.axios.stopXray(connectionOpts),
+                this.axios.stopSingBox(connectionOpts),
+            ]);
 
             // TODO: disable plugins?
 

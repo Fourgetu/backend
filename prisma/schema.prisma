@@ -58,6 +58,8 @@ model Users {
   trojanPassword         String    @map("trojan_password")
   vlessUuid              String    @map("vless_uuid") @db.Uuid
   ssPassword             String    @map("ss_password")
+  socksUsername          String    @unique @default(dbgenerated("'rw-' || replace(gen_random_uuid()::text, '-', '')")) @map("socks_username")
+  socksPassword          String    @default(dbgenerated("replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')")) @map("socks_password")
   description            String?   @map("description")
   tag                    String?   @map("tag")
   telegramId             BigInt?   @map("telegram_id")
@@ -75,6 +77,7 @@ model Users {
   userSubscriptionRequestHistory UserSubscriptionRequestHistory[]
   userMetas                      UserMeta[]
   torrentBlockerReports          TorrentBlockerReports[]
+  speedLimitRoutes               UserRoutes[]
   traffic                        UserTraffic?
 
   externalSquad ExternalSquads? @relation(fields: [externalSquadUuid], references: [uuid], onDelete: SetNull)
@@ -169,8 +172,9 @@ model Nodes {
   port     Int?    @map("port")
   proxyUrl String? @map("proxy_url")
 
-  activeConfigProfileUuid String? @map("active_config_profile_uuid") @db.Uuid
-  activePluginUuid        String? @map("active_plugin_uuid") @db.Uuid
+  activeConfigProfileUuid        String? @map("active_config_profile_uuid") @db.Uuid
+  activeSingBoxConfigProfileUuid String? @map("active_singbox_config_profile_uuid") @db.Uuid
+  activePluginUuid               String? @map("active_plugin_uuid") @db.Uuid
 
   isConnected  Boolean @default(false) @map("is_connected")
   isConnecting Boolean @default(false) @map("is_connecting")
@@ -210,12 +214,15 @@ model Nodes {
   connectedUsers               UserTraffic[]
   nodeMetas                    NodeMeta[]
   torrentBlockerReports        TorrentBlockerReports[]
+  userRoutes                   UserRoutes[]
 
-  activeConfigProfile ConfigProfiles? @relation(fields: [activeConfigProfileUuid], references: [uuid], onDelete: SetNull)
-  provider            InfraProviders? @relation(fields: [providerUuid], references: [uuid], onDelete: SetNull)
-  activePlugin        NodePlugin?     @relation(fields: [activePluginUuid], references: [uuid], onDelete: SetNull)
+  activeConfigProfile        ConfigProfiles? @relation("ActiveXrayConfigProfile", fields: [activeConfigProfileUuid], references: [uuid], onDelete: SetNull)
+  activeSingBoxConfigProfile ConfigProfiles? @relation("ActiveSingBoxConfigProfile", fields: [activeSingBoxConfigProfileUuid], references: [uuid], onDelete: SetNull)
+  provider                   InfraProviders? @relation(fields: [providerUuid], references: [uuid], onDelete: SetNull)
+  activePlugin               NodePlugin?     @relation(fields: [activePluginUuid], references: [uuid], onDelete: SetNull)
 
   @@index([id])
+  @@index([activeSingBoxConfigProfileUuid])
   @@map("nodes")
 }
 
@@ -309,6 +316,7 @@ model Hosts {
 
   nodes          HostsToNodes[]
   internalSquads InternalSquadHostLinks[]
+  userRoutes     UserRoutes[]
 
   @@map("hosts")
 }
@@ -422,13 +430,15 @@ model ConfigProfiles {
   uuid         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   viewPosition Int      @default(autoincrement()) @map("view_position")
   name         String   @unique @map("name")
+  coreType     String   @default("xray") @map("core_type")
   tags         String[] @default([]) @map("tags")
   config       Json     @map("config")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
-  nodes                 Nodes[]
+  nodes                 Nodes[]                 @relation("ActiveXrayConfigProfile")
+  singBoxNodes          Nodes[]                 @relation("ActiveSingBoxConfigProfile")
   configProfileInbounds ConfigProfileInbounds[]
   hosts                 Hosts[]
 
@@ -452,10 +462,91 @@ model ConfigProfileInbounds {
   hosts                        Hosts[]
   configProfileInboundsToNodes ConfigProfileInboundsToNodes[]
   internalSquadInbounds        InternalSquadInbounds[]
+  userRoutes                   UserRoutes[]
+  portHoppingConfig            PortHoppingConfigs?
 
   @@unique([tag])
   @@index([profileUuid, uuid])
   @@map("config_profile_inbounds")
+}
+
+/// A reusable per-route bandwidth policy. All values are bytes per second;
+/// zero means unlimited for that direction.
+model SpeedLimits {
+  uuid                   String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                   String  @unique @db.VarChar(100)
+  downloadBytesPerSecond BigInt  @default(0) @map("download_bytes_per_second")
+  uploadBytesPerSecond   BigInt  @default(0) @map("upload_bytes_per_second")
+  enabled                Boolean @default(true) @map("enabled")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  routes UserRoutes[]
+
+  @@map("speed_limits")
+}
+
+/// A user's concrete subscription route on a node/inbound/host.
+/// The Xray credential remains on Users; this record only changes the
+/// externally reachable port and the GOST forwarding metadata.
+model UserRoutes {
+  uuid                     String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                   BigInt  @map("user_id")
+  nodeUuid                 String  @map("node_uuid") @db.Uuid
+  configProfileInboundUuid String  @map("config_profile_inbound_uuid") @db.Uuid
+  hostUuid                 String  @map("host_uuid") @db.Uuid
+  speedLimitUuid           String? @map("speed_limit_uuid") @db.Uuid
+  portHoppingConfigUuid    String? @map("port_hopping_config_uuid") @db.Uuid
+
+  externalPort    Int     @map("external_port")
+  internalAddress String  @default("127.0.0.1") @map("internal_address")
+  internalPort    Int     @map("internal_port")
+  gostForwardId   String? @map("gost_forward_id") @db.VarChar(128)
+  gostServiceName String? @map("gost_service_name") @db.VarChar(128)
+  network         String  @default("tcp") @db.VarChar(16)
+  enabled         Boolean @default(true) @map("enabled")
+  hopStartPort    Int?    @map("hop_start_port")
+  hopEndPort      Int?    @map("hop_end_port")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user                 Users                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  node                 Nodes                 @relation(fields: [nodeUuid], references: [uuid], onDelete: Cascade)
+  configProfileInbound ConfigProfileInbounds @relation(fields: [configProfileInboundUuid], references: [uuid], onDelete: Cascade)
+  host                 Hosts                 @relation(fields: [hostUuid], references: [uuid], onDelete: Cascade)
+  speedLimit           SpeedLimits?          @relation(fields: [speedLimitUuid], references: [uuid], onDelete: SetNull)
+  portHoppingConfig    PortHoppingConfigs?   @relation(fields: [portHoppingConfigUuid], references: [uuid], onDelete: SetNull)
+
+  @@unique([userId, nodeUuid, configProfileInboundUuid, hostUuid, network])
+  @@unique([nodeUuid, externalPort, network])
+  @@unique([portHoppingConfigUuid, nodeUuid, hopStartPort, hopEndPort])
+  @@index([userId])
+  @@index([nodeUuid, configProfileInboundUuid])
+  @@index([speedLimitUuid])
+  @@index([portHoppingConfigUuid])
+  @@map("user_routes")
+}
+
+/// A per-inbound Hysteria2 UDP hopping pool. Allocations are persisted on
+/// UserRoutes so panel and node restarts never reshuffle a user's range.
+model PortHoppingConfigs {
+  uuid                     String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  configProfileInboundUuid String  @unique @map("config_profile_inbound_uuid") @db.Uuid
+  enabled                  Boolean @default(false)
+  poolStart                Int     @map("pool_start")
+  poolEnd                  Int     @map("pool_end")
+  portsPerUser             Int     @map("ports_per_user")
+  hopIntervalSeconds       Int     @default(30) @map("hop_interval_seconds")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  configProfileInbound ConfigProfileInbounds @relation(fields: [configProfileInboundUuid], references: [uuid], onDelete: Cascade)
+  userRoutes           UserRoutes[]
+
+  @@map("port_hopping_configs")
 }
 
 model ConfigProfileInboundsToNodes {

@@ -18,12 +18,13 @@ export class NodesSystemCacheService {
             pipe.get(CACHE_KEYS.NODE_USERS_ONLINE(node.uuid));
             pipe.get(CACHE_KEYS.NODE_VERSIONS(node.uuid));
             pipe.get(CACHE_KEYS.NODE_XRAY_UPTIME(node.uuid));
+            pipe.get(CACHE_KEYS.NODE_RUNTIME_HEALTH(node.uuid));
         }
 
         const results = await pipe.exec();
         const map = new Map<string, INodeHotCache>();
 
-        const KEYS_PER_NODE = 5;
+        const KEYS_PER_NODE = 6;
 
         if (!results) {
             for (const node of nodes) {
@@ -32,6 +33,7 @@ export class NodesSystemCacheService {
                     versions: null,
                     xrayUptime: 0,
                     onlineUsers: 0,
+                    runtimeHealth: null,
                 });
             }
             return map;
@@ -44,6 +46,7 @@ export class NodesSystemCacheService {
             const [onlineErr, rawOnline] = results[base + 2];
             const [versionsErr, rawVersions] = results[base + 3];
             const [uptimeErr, rawUptime] = results[base + 4];
+            const [runtimeHealthErr, rawRuntimeHealth] = results[base + 5];
 
             const system =
                 !infoErr && !statsErr && rawInfo && rawStats
@@ -56,20 +59,33 @@ export class NodesSystemCacheService {
             const versions = !versionsErr && rawVersions ? JSON.parse(rawVersions as string) : null;
             const xrayUptime = !uptimeErr && rawUptime ? Number(rawUptime) : 0;
             const onlineUsers = !onlineErr && rawOnline ? Number(rawOnline) : 0;
+            const runtimeHealth =
+                !runtimeHealthErr && rawRuntimeHealth
+                    ? JSON.parse(rawRuntimeHealth as string)
+                    : null;
 
-            map.set(nodes[i].uuid, { system, versions, xrayUptime, onlineUsers });
+            map.set(nodes[i].uuid, {
+                system,
+                versions,
+                xrayUptime,
+                onlineUsers,
+                runtimeHealth,
+            });
         }
 
         return map;
     }
 
     async getOne(uuid: string): Promise<INodeHotCache> {
-        const [info, stats, versions, xrayUptime, onlineUsers] = await Promise.all([
+        const [info, stats, versions, xrayUptime, onlineUsers, runtimeHealth] = await Promise.all([
             this.rawCacheService.get<INodeSystem['info']>(CACHE_KEYS.NODE_SYSTEM_INFO(uuid)),
             this.rawCacheService.get<INodeSystem['stats']>(CACHE_KEYS.NODE_SYSTEM_STATS(uuid)),
             this.rawCacheService.get<INodeVersions>(CACHE_KEYS.NODE_VERSIONS(uuid)),
             this.rawCacheService.getNumber(CACHE_KEYS.NODE_XRAY_UPTIME(uuid)),
             this.rawCacheService.getNumber(CACHE_KEYS.NODE_USERS_ONLINE(uuid)),
+            this.rawCacheService.get<INodeHotCache['runtimeHealth']>(
+                CACHE_KEYS.NODE_RUNTIME_HEALTH(uuid),
+            ),
         ]);
 
         let system: INodeSystem | null = null;
@@ -80,7 +96,7 @@ export class NodesSystemCacheService {
             };
         }
 
-        return { system, versions, xrayUptime, onlineUsers };
+        return { system, versions, xrayUptime, onlineUsers, runtimeHealth };
     }
 
     async delete(uuid: string): Promise<void> {
@@ -90,6 +106,7 @@ export class NodesSystemCacheService {
             CACHE_KEYS.NODE_USERS_ONLINE(uuid),
             CACHE_KEYS.NODE_VERSIONS(uuid),
             CACHE_KEYS.NODE_XRAY_UPTIME(uuid),
+            CACHE_KEYS.NODE_RUNTIME_HEALTH(uuid),
         ]);
     }
 

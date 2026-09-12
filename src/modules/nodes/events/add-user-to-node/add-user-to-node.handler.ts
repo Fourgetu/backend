@@ -38,7 +38,15 @@ export class AddUserToNodeHandler implements IEventHandler<AddUserToNodeEvent> {
                 return;
             }
 
-            const { id, trojanPassword, vlessUuid, ssPassword, inbounds } = userEntity.response;
+            const {
+                id,
+                trojanPassword,
+                vlessUuid,
+                ssPassword,
+                socksUsername,
+                socksPassword,
+                inbounds,
+            } = userEntity.response;
 
             if (inbounds.length === 0) {
                 return;
@@ -50,7 +58,7 @@ export class AddUserToNodeHandler implements IEventHandler<AddUserToNodeEvent> {
                 return;
             }
 
-            const userData: AddUserToNodeCommandSdk.Request = {
+            const userData = {
                 hashData: {
                     vlessUuid,
                     prevVlessUuid: event.prevVlessUuid,
@@ -92,24 +100,41 @@ export class AddUserToNodeHandler implements IEventHandler<AddUserToNodeEvent> {
                                 tag: inbound.tag,
                             };
                         case 'hysteria':
+                        case 'hysteria2':
+                        case 'anytls':
                             return {
                                 type: inboundType,
                                 username: id.toString(),
                                 password: vlessUuid,
                                 tag: inbound.tag,
                             };
+                        case 'socks':
+                            return {
+                                type: inboundType,
+                                username: socksUsername,
+                                password: socksPassword,
+                                tag: inbound.tag,
+                            };
                         default:
                             throw new Error(`Unsupported inbound type: ${inboundType}`);
                     }
                 }),
-            };
+            } as unknown as AddUserToNodeCommandSdk.Request;
 
             for (const node of nodes) {
-                if (node.activeInbounds.length === 0 || !node.activeConfigProfileUuid) {
+                if (
+                    node.activeInbounds.length === 0 ||
+                    (!node.activeConfigProfileUuid && !node.activeSingBoxConfigProfileUuid)
+                ) {
                     continue;
                 }
 
                 const activeTags = new Set(node.activeInbounds.map((inbound) => inbound.tag));
+
+                if (node.activeInbounds.some((inbound) => inbound.type === 'socks')) {
+                    await this.nodesQueuesService.startNode({ nodeUuid: node.uuid });
+                    continue;
+                }
 
                 const filteredData = {
                     ...userData,

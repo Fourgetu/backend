@@ -20,6 +20,7 @@ export namespace RestartNodeCommand {
 
     export const RequestBodySchema = z.object({
         forceRestart: z.boolean(),
+        runtime: z.enum(['all', 'xray', 'singbox', 'gost']).optional(),
     });
 
     export type RequestParam = z.infer<typeof RequestParamSchema>;

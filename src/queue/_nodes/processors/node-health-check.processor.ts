@@ -8,12 +8,15 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GetSystemStatsCommand } from '@remnawave/node-contract';
 
 import { AxiosService, INodeConnectionOpts } from '@common/axios';
+import { PrismaService } from '@common/database/prisma.service';
+import { reconcileGostForwards } from '@common/gost-runtime/reconcile-gost-forwards';
 import { RawCacheService } from '@common/raw-cache';
 import { CACHE_KEYS, CACHE_KEYS_TTL, EVENTS } from '@libs/contracts/constants';
 
 import { NodeEvent } from '@integration-modules/notifications/interfaces';
 
 import { UpdateNodeCommand } from '@modules/nodes/commands/update-node';
+import { INodeRuntimeHealth, INodeVersions } from '@modules/nodes/interfaces';
 
 import { NodesQueuesService } from '@queue/_nodes';
 import { QUEUES_NAMES } from '@queue/queue.enum';
@@ -33,6 +36,7 @@ export class NodeHealthCheckQueueProcessor extends WorkerHost {
         private readonly axios: AxiosService,
         private readonly nodesQueuesService: NodesQueuesService,
         private readonly rawCacheService: RawCacheService,
+        private readonly prisma: PrismaService,
     ) {
         super();
     }
@@ -91,20 +95,80 @@ export class NodeHealthCheckQueueProcessor extends WorkerHost {
         isConnected: boolean,
         stats: GetSystemStatsCommand.Response['response'],
     ) {
-        if (stats.xrayInfo === null) {
-            this.logger.error(`Node ${nodeUuid} – xrayInfo is null`);
-
-            await this.commandBus.execute(
-                new UpdateNodeCommand({
-                    uuid: nodeUuid,
-                    isConnected: false,
-                    lastStatusChange: new Date(),
-                    lastStatusMessage: 'Required info is missing. Outdated version?',
-                }),
-            );
-
-            return;
-        }
+        const nodeHealthResult = await this.axios.getNodeHealth(connectionOpts);
+        const advertisedHealth = nodeHealthResult.isOk
+            ? (nodeHealthResult.response as typeof nodeHealthResult.response & {
+                  cores?: {
+                      xray: { online: boolean; version: string | null };
+                      singbox: { online: boolean; version: string | null };
+                      gost: {
+                          online: boolean;
+                          version: string | null;
+                          installed: boolean;
+                          services: number;
+                      };
+                  };
+              })
+            : undefined;
+        const observedAt = new Date().toISOString();
+        const runtimeHealth: INodeRuntimeHealth = advertisedHealth?.cores
+            ? {
+                  observedAt,
+                  xray: {
+                      status: advertisedHealth.cores.xray.online ? 'running' : 'stopped',
+                      version: advertisedHealth.cores.xray.version,
+                  },
+                  singbox: {
+                      status: advertisedHealth.cores.singbox.online ? 'running' : 'stopped',
+                      version: advertisedHealth.cores.singbox.version,
+                  },
+                  gost: {
+                      status: !advertisedHealth.cores.gost.installed
+                          ? 'unavailable'
+                          : advertisedHealth.cores.gost.online
+                            ? 'running'
+                            : 'stopped',
+                      version: advertisedHealth.cores.gost.version,
+                      installed: advertisedHealth.cores.gost.installed,
+                      services: advertisedHealth.cores.gost.services,
+                  },
+              }
+            : {
+                  observedAt,
+                  xray: {
+                      status: stats.xrayInfo === null ? 'unknown' : 'running',
+                      version: advertisedHealth?.xrayVersion ?? null,
+                  },
+                  singbox: { status: 'unknown', version: null },
+                  gost: {
+                      status: 'unknown',
+                      version: null,
+                      installed: null,
+                      services: null,
+                  },
+              };
+        const currentVersions = await this.rawCacheService.get<INodeVersions>(
+            CACHE_KEYS.NODE_VERSIONS(nodeUuid),
+        );
+        const xrayVersion = runtimeHealth.xray.version ?? currentVersions?.xray;
+        const nodeVersion = advertisedHealth?.nodeVersion ?? currentVersions?.node;
+        const versions =
+            xrayVersion && nodeVersion
+                ? {
+                      xray: xrayVersion,
+                      ...(runtimeHealth.singbox.version
+                          ? { singbox: runtimeHealth.singbox.version }
+                          : currentVersions?.singbox
+                            ? { singbox: currentVersions.singbox }
+                            : {}),
+                      ...(runtimeHealth.gost.version
+                          ? { gost: runtimeHealth.gost.version }
+                          : currentVersions?.gost
+                            ? { gost: currentVersions.gost }
+                            : {}),
+                      node: nodeVersion,
+                  }
+                : null;
 
         await this.rawCacheService.setMany([
             {
@@ -114,9 +178,22 @@ export class NodeHealthCheckQueueProcessor extends WorkerHost {
             },
             {
                 key: CACHE_KEYS.NODE_XRAY_UPTIME(nodeUuid),
-                value: stats.xrayInfo.uptime,
+                value: stats.xrayInfo?.uptime ?? 0,
                 ttlSeconds: CACHE_KEYS_TTL.NODE_XRAY_UPTIME,
             },
+            {
+                key: CACHE_KEYS.NODE_RUNTIME_HEALTH(nodeUuid),
+                value: runtimeHealth,
+                ttlSeconds: CACHE_KEYS_TTL.NODE_RUNTIME_HEALTH,
+            },
+            ...(versions
+                ? [
+                      {
+                          key: CACHE_KEYS.NODE_VERSIONS(nodeUuid),
+                          value: versions,
+                      },
+                  ]
+                : []),
         ]);
 
         const reports = stats.plugins.torrentBlocker.reportsCount;
@@ -143,6 +220,22 @@ export class NodeHealthCheckQueueProcessor extends WorkerHost {
 
             await this.nodesQueuesService.startNode({ nodeUuid });
 
+            const gostResult = await reconcileGostForwards(
+                this.prisma,
+                this.axios,
+                nodeUuid,
+                connectionOpts,
+            );
+            if (!gostResult.isOk || !gostResult.response.applied) {
+                this.logger.warn(
+                    `GOST reconnect reconcile skipped for node ${nodeUuid}: ${
+                        gostResult.isOk
+                            ? (gostResult.response.error ?? 'runtime rejected configuration')
+                            : (gostResult.message ?? 'node runtime unavailable')
+                    }`,
+                );
+            }
+
             this.eventEmitter.emit(
                 EVENTS.NODE.CONNECTION_RESTORED,
                 new NodeEvent(nodeUpdatedResponse.response, EVENTS.NODE.CONNECTION_RESTORED),
@@ -161,6 +254,7 @@ export class NodeHealthCheckQueueProcessor extends WorkerHost {
             CACHE_KEYS.NODE_SYSTEM_INFO(nodeUuid),
             CACHE_KEYS.NODE_USERS_ONLINE(nodeUuid),
             CACHE_KEYS.NODE_XRAY_UPTIME(nodeUuid),
+            CACHE_KEYS.NODE_RUNTIME_HEALTH(nodeUuid),
         ]);
 
         const newNodeEntity = await this.commandBus.execute(

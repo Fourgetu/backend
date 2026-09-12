@@ -1,4 +1,4 @@
-import { ERRORS, EVENTS, NODES_BULK_ACTIONS } from '@contract/constants';
+import { CONFIG_PROFILE_CORE_TYPE, ERRORS, EVENTS, NODES_BULK_ACTIONS } from '@contract/constants';
 import { Prisma } from '@prisma/client';
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -43,7 +43,7 @@ export class NodesService {
 
     public async createNode(body: CreateNodeBodyDto): Promise<TResult<NodeResponseModel>> {
         try {
-            const { configProfile, ...nodeData } = body;
+            const { configProfile, singBoxConfigProfile, ...nodeData } = body;
 
             const nodeEntity = new NodesEntity({
                 ...nodeData,
@@ -55,33 +55,48 @@ export class NodesService {
                 consumptionMultiplier: mapDefined(nodeData.consumptionMultiplier, toNano),
                 nodeConsumptionMultiplier: mapDefined(nodeData.nodeConsumptionMultiplier, toNano),
                 activeConfigProfileUuid: configProfile.activeConfigProfileUuid,
+                activeSingBoxConfigProfileUuid:
+                    singBoxConfigProfile?.activeConfigProfileUuid ?? null,
             });
 
             const result = await this.nodesRepository.create(nodeEntity);
 
-            if (configProfile) {
-                const configProfileResponse = await this.queryBus.execute(
-                    new GetConfigProfileByUuidQuery(configProfile.activeConfigProfileUuid),
+            const bindings = [
+                {
+                    binding: configProfile,
+                    expectedCoreType: CONFIG_PROFILE_CORE_TYPE.XRAY,
+                },
+                singBoxConfigProfile
+                    ? {
+                          binding: singBoxConfigProfile,
+                          expectedCoreType: CONFIG_PROFILE_CORE_TYPE.SINGBOX,
+                      }
+                    : null,
+            ].filter((binding) => binding !== null);
+            const inboundUuids: string[] = [];
+
+            for (const { binding, expectedCoreType } of bindings) {
+                const profileResponse = await this.queryBus.execute(
+                    new GetConfigProfileByUuidQuery(binding.activeConfigProfileUuid),
                 );
-
-                if (configProfileResponse.isOk) {
-                    const inbounds = configProfileResponse.response.inbounds;
-
-                    const areAllInboundsFromConfigProfile = configProfile.activeInbounds.every(
-                        (activeInboundUuid) =>
-                            inbounds.some((inbound) => inbound.uuid === activeInboundUuid),
+                if (!profileResponse.isOk) return fail(ERRORS.CONFIG_PROFILE_NOT_FOUND);
+                if (profileResponse.response.coreType !== expectedCoreType) {
+                    return fail(
+                        ERRORS.CONFIG_VALIDATION_ERROR.withMessage(
+                            `The ${expectedCoreType} node slot requires a ${expectedCoreType} profile.`,
+                        ),
                     );
-
-                    if (areAllInboundsFromConfigProfile) {
-                        await this.nodesRepository.addInboundsToNode(
-                            result.uuid,
-                            configProfile.activeInbounds,
-                        );
-                    } else {
-                        return fail(ERRORS.CONFIG_PROFILE_INBOUND_NOT_FOUND_IN_SPECIFIED_PROFILE);
-                    }
                 }
+                const allExist = binding.activeInbounds.every((uuid) =>
+                    profileResponse.response.inbounds.some((inbound) => inbound.uuid === uuid),
+                );
+                if (!allExist) {
+                    return fail(ERRORS.CONFIG_PROFILE_INBOUND_NOT_FOUND_IN_SPECIFIED_PROFILE);
+                }
+                inboundUuids.push(...binding.activeInbounds);
             }
+
+            await this.nodesRepository.addInboundsToNode(result.uuid, inboundUuids);
 
             const node = await this.nodesRepository.findByUUID(result.uuid);
 
@@ -134,6 +149,7 @@ export class NodesService {
                                 onlineUsers: 0,
                                 versions: null,
                                 xrayUptime: 0,
+                                runtimeHealth: null,
                             },
                         ),
                 ),
@@ -144,7 +160,11 @@ export class NodesService {
         }
     }
 
-    public async restartNode(uuid: string, force: boolean): Promise<TResult<boolean>> {
+    public async restartNode(
+        uuid: string,
+        force: boolean,
+        runtime: 'all' | 'gost' | 'singbox' | 'xray' = 'all',
+    ): Promise<TResult<boolean>> {
         try {
             const node = await this.nodesRepository.findByUUID(uuid);
             if (!node) {
@@ -158,6 +178,7 @@ export class NodesService {
             await this.nodesQueuesService.startNode({
                 nodeUuid: node.uuid,
                 force,
+                runtime,
             });
 
             return ok(true);
@@ -248,37 +269,68 @@ export class NodesService {
 
     public async updateNode(body: UpdateNodeBodyDto): Promise<TResult<NodeResponseModel>> {
         try {
-            const { configProfile, ...nodeData } = body;
+            const { configProfile, singBoxConfigProfile, ...nodeData } = body;
 
             const node = await this.nodesRepository.findByUUID(body.uuid);
             if (!node) {
                 return fail(ERRORS.NODE_NOT_FOUND);
             }
 
-            if (configProfile) {
-                const configProfileResponse = await this.queryBus.execute(
-                    new GetConfigProfileByUuidQuery(configProfile.activeConfigProfileUuid),
+            const nextInboundUuids = new Set(node.activeInbounds.map((inbound) => inbound.uuid));
+            const changedBindings = [
+                configProfile
+                    ? {
+                          binding: configProfile,
+                          previousProfileUuid: node.activeConfigProfileUuid,
+                          expectedCoreType: CONFIG_PROFILE_CORE_TYPE.XRAY,
+                      }
+                    : null,
+                singBoxConfigProfile
+                    ? {
+                          binding: singBoxConfigProfile,
+                          previousProfileUuid: node.activeSingBoxConfigProfileUuid,
+                          expectedCoreType: CONFIG_PROFILE_CORE_TYPE.SINGBOX,
+                      }
+                    : null,
+            ].filter((binding) => binding !== null);
+
+            for (const { binding, previousProfileUuid, expectedCoreType } of changedBindings) {
+                const profileResponse = await this.queryBus.execute(
+                    new GetConfigProfileByUuidQuery(binding.activeConfigProfileUuid),
                 );
-
-                if (configProfileResponse.isOk) {
-                    const inbounds = configProfileResponse.response.inbounds;
-
-                    const areAllInboundsFromConfigProfile = configProfile.activeInbounds.every(
-                        (activeInboundUuid) =>
-                            inbounds.some((inbound) => inbound.uuid === activeInboundUuid),
+                if (!profileResponse.isOk) return fail(ERRORS.CONFIG_PROFILE_NOT_FOUND);
+                if (profileResponse.response.coreType !== expectedCoreType) {
+                    return fail(
+                        ERRORS.CONFIG_VALIDATION_ERROR.withMessage(
+                            `The ${expectedCoreType} node slot requires a ${expectedCoreType} profile.`,
+                        ),
                     );
+                }
+                const allExist = binding.activeInbounds.every((uuid) =>
+                    profileResponse.response.inbounds.some((inbound) => inbound.uuid === uuid),
+                );
+                if (!allExist) {
+                    return fail(ERRORS.CONFIG_PROFILE_INBOUND_NOT_FOUND_IN_SPECIFIED_PROFILE);
+                }
 
-                    if (areAllInboundsFromConfigProfile) {
-                        await this.nodesRepository.removeInboundsFromNode(node.uuid);
+                for (const inbound of node.activeInbounds) {
+                    if (inbound.profileUuid === previousProfileUuid)
+                        nextInboundUuids.delete(inbound.uuid);
+                }
+                for (const uuid of binding.activeInbounds) nextInboundUuids.add(uuid);
+            }
 
-                        await this.nodesRepository.addInboundsToNode(
-                            node.uuid,
-                            configProfile.activeInbounds,
-                        );
-                    } else {
-                        return fail(ERRORS.CONFIG_PROFILE_INBOUND_NOT_FOUND_IN_SPECIFIED_PROFILE);
+            if (singBoxConfigProfile === null) {
+                for (const inbound of node.activeInbounds) {
+                    if (inbound.profileUuid === node.activeSingBoxConfigProfileUuid) {
+                        nextInboundUuids.delete(inbound.uuid);
                     }
                 }
+            }
+
+            if (configProfile !== undefined || singBoxConfigProfile !== undefined) {
+                await this.nodesRepository.removeInboundsFromNode(node.uuid);
+                await this.nodesRepository.addInboundsToNode(node.uuid, [...nextInboundUuids]);
             }
 
             const result = await this.nodesRepository.update({
@@ -288,6 +340,10 @@ export class NodesService {
                 consumptionMultiplier: mapDefined(nodeData.consumptionMultiplier, toNano),
                 nodeConsumptionMultiplier: mapDefined(nodeData.nodeConsumptionMultiplier, toNano),
                 activeConfigProfileUuid: configProfile?.activeConfigProfileUuid,
+                activeSingBoxConfigProfileUuid:
+                    singBoxConfigProfile === null
+                        ? null
+                        : singBoxConfigProfile?.activeConfigProfileUuid,
             });
 
             if (!result) {
@@ -458,6 +514,7 @@ export class NodesService {
                                 onlineUsers: 0,
                                 versions: null,
                                 xrayUptime: 0,
+                                runtimeHealth: null,
                             },
                         ),
                 ),

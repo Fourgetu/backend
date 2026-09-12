@@ -147,4 +147,14 @@ export const CONTROLLERS_INFO = {
             "Manage API tokens to use in your code. This controller can't be used with API token, only with Admin JWT token",
         resource: 'api-tokens',
     },
+    SPEED_LIMITS: {
+        tag: 'Speed Limits Controller',
+        description: 'Manage reusable per-route bandwidth policies.',
+        resource: 'speed-limits',
+    },
+    USER_ROUTES: {
+        tag: 'User Routes Controller',
+        description: 'Manage per-user node/inbound subscription routes.',
+        resource: 'user-routes',
+    },
 } as const;

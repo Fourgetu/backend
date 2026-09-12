@@ -20,12 +20,14 @@ type VlessConfig = Extract<ResolvedProxyConfig, { protocol: 'vless' }>;
 type TrojanConfig = Extract<ResolvedProxyConfig, { protocol: 'trojan' }>;
 type ShadowsocksConfig = Extract<ResolvedProxyConfig, { protocol: 'shadowsocks' }>;
 type HysteriaConfig = Extract<ResolvedProxyConfig, { protocol: 'hysteria' }>;
+type SocksConfig = Extract<ResolvedProxyConfig, { protocol: 'socks' }>;
 
 type ProtocolBuilderMap = {
     vless: (host: VlessConfig) => object;
     trojan: (host: TrojanConfig) => object;
     shadowsocks: (host: ShadowsocksConfig) => object;
     hysteria: (host: HysteriaConfig) => object;
+    socks: (host: SocksConfig) => object;
 };
 
 type WsConfig = Extract<ResolvedProxyConfig, { transport: 'ws' }>;
@@ -86,6 +88,20 @@ const PROTOCOL_BUILDERS: ProtocolBuilderMap = {
                 method: host.protocolOptions.method,
                 uot: host.protocolOptions.uot,
                 UoTVersion: host.protocolOptions.uotVersion,
+            },
+        ],
+    }),
+    socks: (host) => ({
+        servers: [
+            {
+                address: host.address,
+                port: host.port,
+                users: [
+                    {
+                        user: host.protocolOptions.username,
+                        pass: host.protocolOptions.password,
+                    },
+                ],
             },
         ],
     }),
@@ -220,6 +236,7 @@ export class XrayJsonGeneratorService {
             for (const host of hosts) {
                 if (host.metadata.isHidden) continue;
                 if (host.metadata.excludeFromSubscriptionTypes.includes('XRAY_JSON')) continue;
+                if (!this.supportsProtocol(host)) continue;
 
                 const baseTemplate = ignoreHostXrayJsonTemplate
                     ? templateContent
@@ -332,6 +349,10 @@ export class XrayJsonGeneratorService {
                 return PROTOCOL_BUILDERS.shadowsocks(host);
             case 'hysteria':
                 return PROTOCOL_BUILDERS.hysteria(host);
+            case 'socks':
+                return PROTOCOL_BUILDERS.socks(host);
+            case 'anytls':
+                throw new Error('AnyTLS is not supported by Xray JSON clients.');
         }
     }
 
@@ -373,17 +394,25 @@ export class XrayJsonGeneratorService {
         }: { tagPrefix?: string; useHostRemarkAsTag?: boolean; useHostTagAsTag?: boolean },
     ): Outbound[] {
         if (useHostRemarkAsTag) {
-            return hosts.map((h) => this.buildOutbound(h, h.finalRemark));
+            return hosts
+                .filter((host) => this.supportsProtocol(host))
+                .map((h) => this.buildOutbound(h, h.finalRemark));
         }
 
         if (useHostTagAsTag) {
-            return hosts.map((h) => this.buildOutbound(h, h.metadata.tags[0] || h.finalRemark));
+            return hosts
+                .filter((host) => this.supportsProtocol(host))
+                .map((h) => this.buildOutbound(h, h.metadata.tags[0] || h.finalRemark));
         }
 
         const proxyTag = tagPrefix ?? 'proxy';
-        return hosts.map((h, i) =>
-            this.buildOutbound(h, i === 0 ? proxyTag : `${proxyTag}-${i + 1}`),
-        );
+        return hosts
+            .filter((host) => this.supportsProtocol(host))
+            .map((h, i) => this.buildOutbound(h, i === 0 ? proxyTag : `${proxyTag}-${i + 1}`));
+    }
+
+    private supportsProtocol(host: ResolvedProxyConfig): boolean {
+        return host.protocol !== 'anytls';
     }
 
     private parseRegex(pattern: string): RegExp | null {

@@ -31,6 +31,8 @@ import { SubscriptionModule } from './subscription/subscription.module';
 import { SystemModule } from './system/system.module';
 import { UserSubscriptionRequestHistoryModule } from './user-subscription-request-history/user-subscription-request-history.module';
 import { UsersModule } from './users/users.module';
+import { SpeedLimitsModule } from './speed-limits/speed-limits.module';
+import { UserRoutesModule } from './user-routes/user-routes.module';
 
 @Module({
     imports: [
@@ -39,6 +41,8 @@ import { UsersModule } from './users/users.module';
         ConditionalModule.registerWhen(AuthModule, () => isRestApi()),
         ConditionalModule.registerWhen(SubscriptionPageConfigModule, () => isRestApi()),
         UsersModule,
+        ConditionalModule.registerWhen(SpeedLimitsModule, () => isRestApi()),
+        ConditionalModule.registerWhen(UserRoutesModule, () => isRestApi()),
         ConditionalModule.registerWhen(SubscriptionResponseRulesModule, () => isRestApi()),
         ConditionalModule.registerWhen(SubscriptionModule, () => isRestApi()),
         ConditionalModule.registerWhen(ApiTokensModule, () => isRestApi()),

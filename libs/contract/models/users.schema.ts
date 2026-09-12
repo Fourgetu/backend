@@ -19,6 +19,8 @@ export const UsersSchema = z.object({
     trojanPassword: z.string(),
     vlessUuid: z.guid(),
     ssPassword: z.string(),
+    socksUsername: z.string(),
+    socksPassword: z.string(),
     lastTriggeredThreshold: z.int(),
     subRevokedAt: z.nullable(z.iso.datetime().transform((str) => new Date(str))),
     lastTrafficResetAt: z.nullable(z.iso.datetime().transform((str) => new Date(str))),

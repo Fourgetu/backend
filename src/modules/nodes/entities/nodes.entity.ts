@@ -37,6 +37,7 @@ export class NodesEntity implements Nodes {
     public updatedAt: Date;
 
     public activeConfigProfileUuid: string | null;
+    public activeSingBoxConfigProfileUuid: string | null;
     public activeInbounds: ConfigProfileInboundEntity[];
 
     public providerUuid: string | null;

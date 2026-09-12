@@ -1289,4 +1289,79 @@ export const ERRORS = {
         message: 'Set tags error',
         httpCode: 500,
     },
+    SPEED_LIMIT_NOT_FOUND: {
+        code: 'A258',
+        message: 'Speed limit not found',
+        httpCode: 404,
+    },
+    SPEED_LIMIT_NAME_ALREADY_EXISTS: {
+        code: 'A259',
+        message: 'Speed limit name already exists',
+        httpCode: 400,
+    },
+    CREATE_SPEED_LIMIT_ERROR: {
+        code: 'A260',
+        message: 'Create speed limit error',
+        httpCode: 500,
+    },
+    UPDATE_SPEED_LIMIT_ERROR: {
+        code: 'A261',
+        message: 'Update speed limit error',
+        httpCode: 500,
+    },
+    DELETE_SPEED_LIMIT_ERROR: {
+        code: 'A262',
+        message: 'Delete speed limit error',
+        httpCode: 500,
+    },
+    GET_SPEED_LIMITS_ERROR: {
+        code: 'A263',
+        message: 'Get speed limits error',
+        httpCode: 500,
+    },
+    USER_ROUTE_NOT_FOUND: {
+        code: 'A264',
+        message: 'User route not found',
+        httpCode: 404,
+    },
+    USER_ROUTE_PORT_ALREADY_EXISTS: {
+        code: 'A265',
+        message: 'User route external port already exists on this node',
+        httpCode: 400,
+    },
+    USER_ROUTE_REFERENCE_NOT_FOUND: {
+        code: 'A266',
+        message: 'User route reference not found',
+        httpCode: 404,
+    },
+    CREATE_USER_ROUTE_ERROR: {
+        code: 'A267',
+        message: 'Create user route error',
+        httpCode: 500,
+    },
+    UPDATE_USER_ROUTE_ERROR: {
+        code: 'A268',
+        message: 'Update user route error',
+        httpCode: 500,
+    },
+    DELETE_USER_ROUTE_ERROR: {
+        code: 'A269',
+        message: 'Delete user route error',
+        httpCode: 500,
+    },
+    GET_USER_ROUTES_ERROR: {
+        code: 'A270',
+        message: 'Get user routes error',
+        httpCode: 500,
+    },
+    USER_ROUTE_RUNTIME_SYNC_FAILED: {
+        code: 'A271',
+        message: 'User route runtime sync failed',
+        httpCode: 502,
+        withMessage: (message: string) => ({
+            code: 'A271',
+            message,
+            httpCode: 502,
+        }),
+    },
 } as const;

@@ -61,9 +61,10 @@ export class NodesRepository implements ICrud<NodesEntity> {
                 isConnected: true,
                 isDisabled: false,
                 isConnecting: false,
-                activeConfigProfileUuid: {
-                    not: null,
-                },
+                OR: [
+                    { activeConfigProfileUuid: { not: null } },
+                    { activeSingBoxConfigProfileUuid: { not: null } },
+                ],
             },
             include: INCLUDE_RESOLVED_INBOUNDS,
         });
@@ -86,7 +87,12 @@ export class NodesRepository implements ICrud<NodesEntity> {
             .where('isConnected', '=', true)
             .where('isDisabled', '=', false)
             .where('isConnecting', '=', false)
-            .where('activeConfigProfileUuid', 'is not', null)
+            .where((builder) =>
+                builder.or([
+                    builder('activeConfigProfileUuid', 'is not', null),
+                    builder('activeSingboxConfigProfileUuid', 'is not', null),
+                ]),
+            )
             .execute();
 
         return nodesList.map((value) => ({
@@ -137,9 +143,10 @@ export class NodesRepository implements ICrud<NodesEntity> {
             where: {
                 isConnected: true,
                 isDisabled: false,
-                activeConfigProfileUuid: {
-                    not: null,
-                },
+                OR: [
+                    { activeConfigProfileUuid: { not: null } },
+                    { activeSingBoxConfigProfileUuid: { not: null } },
+                ],
             },
         });
 
@@ -406,7 +413,9 @@ export class NodesRepository implements ICrud<NodesEntity> {
         const result = await this.qb.kysely
             .updateTable('nodes')
             .set({
-                integrationUuids: sql<string[]>`array_remove(${sql.ref('nodes.integration_uuids')}, ${getKyselyUuid(integrationUuid)})`,
+                integrationUuids: sql<
+                    string[]
+                >`array_remove(${sql.ref('nodes.integration_uuids')}, ${getKyselyUuid(integrationUuid)})`,
             })
             .where(
                 sql<boolean>`${sql.ref('nodes.integration_uuids')} @> ARRAY[${getKyselyUuid(integrationUuid)}]`,

@@ -317,7 +317,20 @@ export class ConfigProfileRepository {
                 .selectFrom('nodes')
                 .select(['uuid', 'name', 'countryCode'])
                 .orderBy('nodes.viewPosition', 'asc')
-                .whereRef('nodes.activeConfigProfileUuid', '=', 'configProfiles.uuid'),
+                .where((builder) =>
+                    builder.or([
+                        builder(
+                            'nodes.activeConfigProfileUuid',
+                            '=',
+                            builder.ref('configProfiles.uuid'),
+                        ),
+                        builder(
+                            'nodes.activeSingboxConfigProfileUuid',
+                            '=',
+                            builder.ref('configProfiles.uuid'),
+                        ),
+                    ]),
+                ),
         ).as('nodes');
     }
 

@@ -1,3 +1,5 @@
+import { TConfigProfileCoreType } from '@libs/contracts/constants';
+
 import { ConfigProfileWithInboundsAndNodesEntity } from '../entities';
 import { ConfigProfileInboundEntity } from '../entities/config-profile-inbound.entity';
 
@@ -5,6 +7,7 @@ export class GetConfigProfileByUuidResponseModel {
     public readonly uuid: string;
     public readonly viewPosition: number;
     public readonly name: string;
+    public readonly coreType: TConfigProfileCoreType;
     public readonly tags: string[];
     public readonly config: object;
     public readonly inbounds: ConfigProfileInboundEntity[];
@@ -21,6 +24,7 @@ export class GetConfigProfileByUuidResponseModel {
         this.uuid = entity.uuid;
         this.viewPosition = entity.viewPosition;
         this.name = entity.name;
+        this.coreType = entity.coreType as TConfigProfileCoreType;
         this.tags = entity.tags;
         this.config = entity.config as object;
         this.inbounds = entity.inbounds;

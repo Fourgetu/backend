@@ -3,9 +3,9 @@ import { IQueryHandler, QueryBus, QueryHandler } from '@nestjs/cqrs';
 
 import { HashedSet } from '@remnawave/hashed-set';
 
-import { XRayConfig } from '@common/helpers/xray-config/xray-config.validator';
+import { createCoreConfig, ICoreConfig } from '@common/helpers/core-config';
 import { fail, ok, TResult } from '@common/types';
-import { ERRORS } from '@libs/contracts/constants';
+import { ERRORS, TConfigProfileCoreType } from '@libs/contracts/constants';
 
 import { GetConfigProfileByUuidQuery } from '@modules/config-profiles/queries/get-config-profile-by-uuid';
 import { GetSnippetsQuery } from '@modules/config-profiles/queries/get-snippets';
@@ -30,7 +30,7 @@ export class GetPreparedConfigWithUsersHandler implements IQueryHandler<
     async execute(
         query: GetPreparedConfigWithUsersQuery,
     ): Promise<TResult<IGetPreparedConfigWithUsersResponse>> {
-        let config: XRayConfig | null = null;
+        let config: ICoreConfig | null = null;
         const inboundsUserSets: Map<string, HashedSet> = new Map();
         const snippetsMap: Map<string, unknown> = new Map();
         try {
@@ -52,7 +52,10 @@ export class GetPreparedConfigWithUsersHandler implements IQueryHandler<
 
             const activeInboundsTags = new Set(activeInbounds.map((inbound) => inbound.tag));
 
-            config = new XRayConfig(configProfile.response.config as object);
+            config = createCoreConfig(
+                configProfile.response.coreType as TConfigProfileCoreType,
+                configProfile.response.config as object,
+            );
 
             config.cleanInboundClients(true);
 
@@ -70,11 +73,14 @@ export class GetPreparedConfigWithUsersHandler implements IQueryHandler<
                 config.includeUserBatch(userBatch, inboundsUserSets);
             }
 
+            config.finalizeInboundClients();
+
             for (const [tag, set] of inboundsUserSets) {
                 this.logger.debug(`Inbound ${tag}: hash ${set.hash64String} and ${set.size} users`);
             }
 
             return ok({
+                coreType: configProfile.response.coreType as TConfigProfileCoreType,
                 config: config.getConfig(),
                 hashesPayload: {
                     emptyConfig: configHash,

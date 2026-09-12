@@ -75,6 +75,7 @@ export class UsersRepository {
         private readonly userConverter: UserConverter,
     ) {}
 
+    @Transactional()
     public async create(
         entity: BaseUserEntity,
         internalSquadUuids: string[] = [],
@@ -100,6 +101,11 @@ export class UsersRepository {
                     })),
                 },
             },
+        });
+
+        await this.prisma.tx.users.update({
+            where: { id: result.id },
+            data: { socksUsername: result.id.toString() },
         });
 
         return {
@@ -762,6 +768,8 @@ export class UsersRepository {
                     'users.trojanPassword',
                     'users.vlessUuid',
                     'users.ssPassword',
+                    'users.socksUsername',
+                    'users.socksPassword',
                     sql<
                         string[]
                     >`coalesce(json_agg(DISTINCT ${eb.ref('configProfileInbounds.tag')}), '[]')`.as(
@@ -1109,6 +1117,7 @@ export class UsersRepository {
             | 'trojanPassword'
             | 'vlessUuid'
             | 'ssPassword'
+            | 'socksPassword'
             | 'subRevokedAt'
             | 'shortUuid'
             | 'updatedAt'
@@ -1121,6 +1130,7 @@ export class UsersRepository {
                 trojanPassword: dto.trojanPassword,
                 vlessUuid: getKyselyUuid(dto.vlessUuid),
                 ssPassword: dto.ssPassword,
+                socksPassword: dto.socksPassword,
                 shortUuid: dto.shortUuid,
                 updatedAt: dto.updatedAt,
             })
@@ -1140,6 +1150,8 @@ export class UsersRepository {
                 'users.trojanPassword',
                 'users.vlessUuid',
                 'users.ssPassword',
+                'users.socksUsername',
+                'users.socksPassword',
                 jsonArrayFrom(
                     eb
                         .selectFrom('internalSquadMembers')
@@ -1193,6 +1205,8 @@ export class UsersRepository {
                 'users.trojanPassword',
                 'users.vlessUuid',
                 'users.ssPassword',
+                'users.socksUsername',
+                'users.socksPassword',
                 jsonArrayFrom(
                     eb
                         .selectFrom('internalSquadMembers')

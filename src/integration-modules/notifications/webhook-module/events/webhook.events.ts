@@ -259,12 +259,15 @@ export class WebhookEvents {
     }
 
     private async getNodesSystemInfo(uuid: string): Promise<INodeHotCache> {
-        const [info, stats, onlineUsers, xrayUptime, versions] = await Promise.all([
+        const [info, stats, onlineUsers, xrayUptime, versions, runtimeHealth] = await Promise.all([
             this.rawCacheService.get<INodeSystem['info']>(CACHE_KEYS.NODE_SYSTEM_INFO(uuid)),
             this.rawCacheService.get<INodeSystem['stats']>(CACHE_KEYS.NODE_SYSTEM_STATS(uuid)),
             this.rawCacheService.getNumber(CACHE_KEYS.NODE_USERS_ONLINE(uuid)),
             this.rawCacheService.getNumber(CACHE_KEYS.NODE_XRAY_UPTIME(uuid)),
             this.rawCacheService.get<INodeVersions>(CACHE_KEYS.NODE_VERSIONS(uuid)),
+            this.rawCacheService.get<INodeHotCache['runtimeHealth']>(
+                CACHE_KEYS.NODE_RUNTIME_HEALTH(uuid),
+            ),
         ]);
 
         return {
@@ -272,6 +275,7 @@ export class WebhookEvents {
             onlineUsers,
             versions,
             xrayUptime,
+            runtimeHealth,
         };
     }
 }

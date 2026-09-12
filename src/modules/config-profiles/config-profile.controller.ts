@@ -91,7 +91,6 @@ export class ConfigProfileController {
         };
     }
 
-
     @Endpoint({
         command: GetConfigProfilesCommand,
         httpCode: HttpStatus.OK,
@@ -191,7 +190,11 @@ export class ConfigProfileController {
     async createConfigProfile(
         @Body() body: CreateConfigProfileBodyDto,
     ): Promise<CreateConfigProfileResponseDto> {
-        const result = await this.configProfileService.createConfigProfile(body.name, body.config);
+        const result = await this.configProfileService.createConfigProfile(
+            body.name,
+            body.config,
+            body.coreType,
+        );
 
         const data = errorHandler(result);
         return {
@@ -215,6 +218,7 @@ export class ConfigProfileController {
             body.uuid,
             body.name,
             body.config,
+            body.coreType,
         );
 
         const data = errorHandler(result);
@@ -238,5 +242,4 @@ export class ConfigProfileController {
             response: data,
         };
     }
-
 }

@@ -20,6 +20,16 @@ export const ShadowsocksProtocolOptionsSchema = z.object({
     uotVersion: z.int(),
 });
 
+export const SocksProtocolOptionsSchema = z.object({
+    username: z.string(),
+    password: z.string(),
+    version: z.literal(5),
+});
+
+export const AnyTlsProtocolOptionsSchema = z.object({
+    password: z.string(),
+});
+
 const TcpHeaderNoneSchema = z.object({
     type: z.literal('none'),
 });
@@ -133,11 +143,23 @@ const HysteriaProtocolSchema = z.object({
     protocolOptions: HysteriaProtocolOptionsSchema,
 });
 
+const SocksProtocolSchema = z.object({
+    protocol: z.literal('socks'),
+    protocolOptions: SocksProtocolOptionsSchema,
+});
+
+const AnyTlsProtocolSchema = z.object({
+    protocol: z.literal('anytls'),
+    protocolOptions: AnyTlsProtocolOptionsSchema,
+});
+
 export const ProtocolVariantSchema = z.discriminatedUnion('protocol', [
     VlessProtocolSchema.meta({ title: 'vless' }),
     TrojanProtocolSchema.meta({ title: 'trojan' }),
     ShadowsocksProtocolSchema.meta({ title: 'shadowsocks' }),
     HysteriaProtocolSchema.meta({ title: 'hysteria' }),
+    SocksProtocolSchema.meta({ title: 'socks' }),
+    AnyTlsProtocolSchema.meta({ title: 'anytls' }),
 ]);
 
 const TcpTransportSchema = z.object({

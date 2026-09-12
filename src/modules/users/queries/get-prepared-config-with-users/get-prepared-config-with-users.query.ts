@@ -1,15 +1,15 @@
-import { XrayConfig } from 'xray-typed';
-
 import { Query } from '@nestjs/cqrs';
 
 import { StartXrayCommand } from '@remnawave/node-contract';
 
 import { TResult } from '@common/types';
+import { TConfigProfileCoreType } from '@libs/contracts/constants';
 
 import { ConfigProfileInboundEntity } from '@modules/config-profiles/entities';
 
 export interface IGetPreparedConfigWithUsersResponse {
-    config: XrayConfig;
+    coreType: TConfigProfileCoreType;
+    config: object;
     hashesPayload: StartXrayCommand.Request['internals']['hashes'];
 }
 

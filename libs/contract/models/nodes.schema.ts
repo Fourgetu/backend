@@ -35,6 +35,7 @@ export const NodesSchema = z.object({
 
     configProfile: z.object({
         activeConfigProfileUuid: z.nullable(z.uuid()),
+        activeSingBoxConfigProfileUuid: z.nullable(z.uuid()),
         activeInbounds: z.array(ConfigProfileInboundsSchema),
     }),
 
@@ -45,9 +46,30 @@ export const NodesSchema = z.object({
     versions: z.nullable(
         z.object({
             xray: z.string(),
+            singbox: z.string().optional(),
+            gost: z.string().optional(),
             node: z.string(),
         }),
     ),
+    runtimeHealth: z
+        .object({
+            observedAt: z.iso.datetime(),
+            xray: z.object({
+                status: z.enum(['running', 'stopped', 'unavailable', 'unknown']),
+                version: z.string().nullable(),
+            }),
+            singbox: z.object({
+                status: z.enum(['running', 'stopped', 'unavailable', 'unknown']),
+                version: z.string().nullable(),
+            }),
+            gost: z.object({
+                status: z.enum(['running', 'stopped', 'unavailable', 'unknown']),
+                version: z.string().nullable(),
+                installed: z.boolean().nullable(),
+                services: z.number().int().nonnegative().nullable(),
+            }),
+        })
+        .nullable(),
     xrayUptime: z.number(),
     usersOnline: z.number(),
     note: z.nullable(z.string()),

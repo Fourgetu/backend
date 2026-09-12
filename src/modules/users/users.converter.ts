@@ -26,6 +26,8 @@ const entityToModel = (entity: BaseUserEntity): Users => {
         trojanPassword: entity.trojanPassword,
         vlessUuid: entity.vlessUuid,
         ssPassword: entity.ssPassword,
+        socksUsername: entity.socksUsername,
+        socksPassword: entity.socksPassword,
 
         description: entity.description,
         tag: entity.tag,

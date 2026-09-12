@@ -8,7 +8,12 @@ import { CommandBus, QueryBus } from '@nestjs/cqrs';
 
 import { AxiosService } from '@common/axios/axios.service';
 import { RawCacheService } from '@common/raw-cache';
-import { CACHE_KEYS, CACHE_KEYS_TTL } from '@libs/contracts/constants';
+import {
+    CACHE_KEYS,
+    CACHE_KEYS_TTL,
+    CONFIG_PROFILE_CORE_TYPE,
+    TConfigProfileCoreType,
+} from '@libs/contracts/constants';
 
 import { ConfigProfileInboundEntity } from '@modules/config-profiles/entities';
 import { GetResolvedIntegrationsQuery } from '@modules/node-integrations/queries/get-resolved-integrations';
@@ -17,6 +22,7 @@ import { NodePluginEntity } from '@modules/node-plugins/entities';
 import { GetAllPluginsQuery } from '@modules/node-plugins/queries/get-all-plugins';
 import { NodesEntity } from '@modules/nodes';
 import { UpdateNodeCommand } from '@modules/nodes/commands/update-node';
+import { INodeVersions } from '@modules/nodes/interfaces/node-hot-cache.interface';
 import { FindNodesByCriteriaQuery } from '@modules/nodes/queries/find-nodes-by-criteria';
 import { GetPreparedConfigWithUsersQuery } from '@modules/users/queries/get-prepared-config-with-users/get-prepared-config-with-users.query';
 
@@ -71,7 +77,6 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
             const findNodesByCriteriaResult = await this.queryBus.execute(
                 new FindNodesByCriteriaQuery({
                     isDisabled: false,
-                    activeConfigProfileUuid: payload.profileUuid,
                 }),
             );
 
@@ -79,7 +84,11 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
                 return;
             }
 
-            const { response: nodes } = findNodesByCriteriaResult;
+            const nodes = findNodesByCriteriaResult.response.filter(
+                (node) =>
+                    node.activeConfigProfileUuid === payload.profileUuid ||
+                    node.activeSingBoxConfigProfileUuid === payload.profileUuid,
+            );
 
             const activeInboundsOnNodes = new Map<string, ConfigProfileInboundEntity>();
             const activeNodeTags = new Map<string, string[]>();
@@ -91,33 +100,47 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
                     CACHE_KEYS.NODE_XRAY_UPTIME(node.uuid),
                 ]);
 
-                if (node.activeInbounds.length === 0) {
+                const profileInbounds = node.activeInbounds.filter(
+                    (inbound) => inbound.profileUuid === payload.profileUuid,
+                );
+                const isSingBoxProfile =
+                    node.activeSingBoxConfigProfileUuid === payload.profileUuid;
+                const hasOtherAssignment = isSingBoxProfile
+                    ? node.activeConfigProfileUuid !== null
+                    : node.activeSingBoxConfigProfileUuid !== null;
+
+                if (profileInbounds.length === 0) {
                     this.logger.warn(
-                        `No active inbounds found for node ${node.uuid} with profile ${payload.profileUuid}, disabling and clearing profile from node...`,
+                        `No active inbounds found for node ${node.uuid} with profile ${payload.profileUuid}; stopping and unbinding only its ${isSingBoxProfile ? 'sing-box' : 'Xray'} runtime.`,
                     );
+
+                    const connectionOpts = {
+                        address: node.address,
+                        port: node.port,
+                        proxyUrl: node.proxyUrl,
+                    };
+                    if (isSingBoxProfile) await this.axios.stopSingBox(connectionOpts);
+                    else await this.axios.stopXray(connectionOpts);
 
                     await this.commandBus.execute(
                         new UpdateNodeCommand({
                             uuid: node.uuid,
-                            isDisabled: true,
-                            activeConfigProfileUuid: null,
+                            ...(isSingBoxProfile
+                                ? { activeSingBoxConfigProfileUuid: null }
+                                : { activeConfigProfileUuid: null }),
+                            isDisabled: hasOtherAssignment ? node.isDisabled : true,
                             isConnecting: false,
-                            isConnected: false,
+                            isConnected: hasOtherAssignment ? node.isConnected : false,
                             lastStatusMessage: null,
                             lastStatusChange: new Date(),
                         }),
                     );
 
-                    await this.nodesQueuesService.stopNode({
-                        nodeUuid: node.uuid,
-                        isNeedToBeDeleted: false,
-                    });
-
                     continue;
                 }
 
                 this.logger.log(
-                    `Node ${node.uuid} has ${node.activeInbounds.length} active inbounds.`,
+                    `Node ${node.uuid} has ${profileInbounds.length} active inbounds for profile ${payload.profileUuid}.`,
                 );
 
                 await this.commandBus.execute(
@@ -127,7 +150,7 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
                     }),
                 );
 
-                for (const inbound of node.activeInbounds) {
+                for (const inbound of profileInbounds) {
                     if (activeInboundsOnNodes.has(inbound.tag)) {
                         continue;
                     } else {
@@ -137,7 +160,7 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
 
                 activeNodeTags.set(
                     node.uuid,
-                    node.activeInbounds.map((inbound) => inbound.tag),
+                    profileInbounds.map((inbound) => inbound.tag),
                 );
             }
 
@@ -188,6 +211,12 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
                 if (!activeNodeInboundsTags) {
                     throw new Error('Failed to get active node inbounds tags');
                 }
+
+                const isSingBoxProfile =
+                    config.response.coreType === CONFIG_PROFILE_CORE_TYPE.SINGBOX;
+                const hasOtherAssignment = isSingBoxProfile
+                    ? node.activeConfigProfileUuid !== null
+                    : node.activeSingBoxConfigProfileUuid !== null;
 
                 const nodeIntegrations = mergeNodeIntegrations(
                     node.integrationUuids
@@ -247,6 +276,25 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
                     );
                 }
 
+                const healthWithCores =
+                    xrayStatusResponse.response as typeof xrayStatusResponse.response & {
+                        cores?: unknown;
+                    };
+                if (isSingBoxProfile && !healthWithCores.cores) {
+                    await this.commandBus.execute(
+                        new UpdateNodeCommand({
+                            uuid: node.uuid,
+                            lastStatusMessage:
+                                'This Node does not advertise concurrent-core support; upgrade it before starting a sing-box profile.',
+                            lastStatusChange: new Date(),
+                            isConnected: hasOtherAssignment ? node.isConnected : false,
+                            isConnecting: false,
+                        }),
+                    );
+
+                    return;
+                }
+
                 if (pluginsSupported) {
                     let plugin: {
                         uuid: string;
@@ -301,15 +349,19 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
                 const filteredInboundsHashes = config.response.hashesPayload.inbounds.filter(
                     (inbound) => activeNodeInboundsTags.has(inbound.tag),
                 );
+                const coreConfig = config.response.config as {
+                    inbounds?: Record<string, unknown>[];
+                };
 
                 const startXrayResponse = await this.axios.startXray(
                     {
+                        coreType: config.response.coreType,
                         xrayConfig: {
-                            ...config.response.config,
-                            inbounds: config.response.config.inbounds!.filter(
+                            ...coreConfig,
+                            inbounds: (coreConfig.inbounds ?? []).filter(
                                 (inbound) =>
-                                    activeNodeInboundsTags.has(inbound.tag!) ||
-                                    this.isUnsecureInbound(inbound.protocol),
+                                    activeNodeInboundsTags.has(String(inbound.tag)) ||
+                                    !this.isManagedInbound(config.response.coreType, inbound),
                             ),
                         } as unknown as Record<string, unknown>,
                         internals: {
@@ -342,7 +394,7 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
                                 uuid: node.uuid,
                                 lastStatusMessage: startXrayResponse.message ?? null,
                                 lastStatusChange: new Date(),
-                                isConnected: false,
+                                isConnected: hasOtherAssignment ? node.isConnected : false,
                                 isConnecting: false,
                             }),
                         );
@@ -350,6 +402,15 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
                         return;
                     case true:
                         const nodeResponse = startXrayResponse.response;
+                        const currentVersions = await this.rawCacheService.get<INodeVersions>(
+                            CACHE_KEYS.NODE_VERSIONS(node.uuid),
+                        );
+                        const xrayVersion = isSingBoxProfile
+                            ? (currentVersions?.xray ?? xrayStatusResponse.response.xrayVersion)
+                            : nodeResponse.version;
+                        const singBoxVersion = isSingBoxProfile
+                            ? nodeResponse.version
+                            : currentVersions?.singbox;
 
                         await this.rawCacheService.setMany([
                             {
@@ -364,9 +425,12 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
                             {
                                 key: CACHE_KEYS.NODE_VERSIONS(node.uuid),
                                 value:
-                                    nodeResponse.nodeInformation.version && nodeResponse.version
+                                    nodeResponse.nodeInformation.version && xrayVersion
                                         ? {
-                                              xray: nodeResponse.version,
+                                              xray: xrayVersion,
+                                              ...(singBoxVersion
+                                                  ? { singbox: singBoxVersion }
+                                                  : {}),
                                               node: nodeResponse.nodeInformation.version,
                                           }
                                         : null,
@@ -402,7 +466,17 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
         }
     }
 
-    private isUnsecureInbound(protocol: string): boolean {
-        return ['dokodemo-door', 'http', 'mixed', 'tun', 'tunnel', 'wireguard'].includes(protocol);
+    private isManagedInbound(
+        coreType: TConfigProfileCoreType,
+        inbound: Record<string, unknown>,
+    ): boolean {
+        const protocol =
+            coreType === CONFIG_PROFILE_CORE_TYPE.SINGBOX ? inbound.type : inbound.protocol;
+
+        return coreType === CONFIG_PROFILE_CORE_TYPE.SINGBOX
+            ? ['anytls', 'hysteria2', 'shadowsocks', 'socks', 'trojan', 'vless'].includes(
+                  String(protocol),
+              )
+            : ['hysteria', 'shadowsocks', 'trojan', 'vless'].includes(String(protocol));
     }
 }

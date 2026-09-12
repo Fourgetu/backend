@@ -76,6 +76,8 @@ export class UsersService {
                 trojanPassword: dto.trojanPassword || this.createPassword(),
                 vlessUuid: dto.vlessUuid || this.createUuid(),
                 ssPassword: dto.ssPassword || this.createPassword(),
+                socksUsername: `rw-${this.createPassword(16)}`,
+                socksPassword: this.createPassword(),
                 status: dto.status,
                 trafficLimitBytes: wrapBigInt(dto.trafficLimitBytes),
                 trafficLimitStrategy: dto.trafficLimitStrategy,
@@ -335,6 +337,7 @@ export class UsersService {
                 trojanPassword: this.createPassword(),
                 vlessUuid: this.createUuid(),
                 ssPassword: this.createPassword(),
+                socksPassword: this.createPassword(),
                 subRevokedAt: new Date(),
                 updatedAt: new Date(),
             });

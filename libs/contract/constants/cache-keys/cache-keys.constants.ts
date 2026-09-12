@@ -14,6 +14,7 @@ export const CACHE_KEYS = {
     NODE_SYSTEM_STATS: (uuid: string) => `node_system_stats:${uuid}`,
     NODE_USERS_ONLINE: (uuid: string) => `node_users_online:${uuid}`,
     NODE_VERSIONS: (uuid: string) => `node_versions:${uuid}`,
+    NODE_RUNTIME_HEALTH: (uuid: string) => `node_runtime_health:${uuid}`,
     NODE_XRAY_UPTIME: (uuid: string) => `node_xray_uptime:${uuid}`,
     RAW_INBOUND: (uuid: string) => `raw_inbound:${uuid}`,
     XRAY_JSON_TEMPLATE: (uuid: string) => `xray_json_template:${uuid}`,
@@ -30,6 +31,7 @@ export const CACHE_KEYS_TTL = {
     NODE_SYSTEM_STATS: 30, // 30 seconds
     NODE_USERS_ONLINE: 16, // 16 seconds
     NODE_XRAY_UPTIME: 16, // 16 seconds
+    NODE_RUNTIME_HEALTH: 30, // 30 seconds
     RAW_INBOUND: 3_600, // 1 hour
     XRAY_JSON_TEMPLATE: 3_600, // 1 hour
     EXTERNAL_SQUAD_TEMPLATE_NAME: 3_600, // 1 hour

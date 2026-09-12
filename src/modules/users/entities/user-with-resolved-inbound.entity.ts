@@ -5,6 +5,8 @@ export class UserWithResolvedInboundEntity {
     public trojanPassword: string;
     public vlessUuid: string;
     public ssPassword: string;
+    public socksUsername: string;
+    public socksPassword: string;
 
     public inbounds: ConfigProfileInboundEntity[];
 
@@ -13,6 +15,8 @@ export class UserWithResolvedInboundEntity {
         this.trojanPassword = data.trojanPassword;
         this.vlessUuid = data.vlessUuid;
         this.ssPassword = data.ssPassword;
+        this.socksUsername = data.socksUsername;
+        this.socksPassword = data.socksPassword;
         this.inbounds = data.inbounds;
     }
 }

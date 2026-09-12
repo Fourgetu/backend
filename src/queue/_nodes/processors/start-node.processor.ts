@@ -6,10 +6,19 @@ import { Logger } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
+import { StartXrayCommand } from '@remnawave/node-contract';
+
 import { AxiosService } from '@common/axios/axios.service';
+import { PrismaService } from '@common/database/prisma.service';
+import { reconcileGostForwards } from '@common/gost-runtime/reconcile-gost-forwards';
 import { RawCacheService } from '@common/raw-cache';
 import { formatExecutionTime, getTime } from '@common/utils/get-elapsed-time';
-import { CACHE_KEYS, CACHE_KEYS_TTL, EVENTS } from '@libs/contracts/constants';
+import {
+    CACHE_KEYS,
+    CACHE_KEYS_TTL,
+    CONFIG_PROFILE_CORE_TYPE,
+    EVENTS,
+} from '@libs/contracts/constants';
 
 import { NodeEvent } from '@integration-modules/notifications/interfaces';
 
@@ -38,13 +47,20 @@ export class StartNodeProcessor extends WorkerHost {
         private readonly eventEmitter: EventEmitter2,
         private readonly commandBus: CommandBus,
         private readonly rawCacheService: RawCacheService,
+        private readonly prisma: PrismaService,
     ) {
         super();
     }
 
-    async process(job: Job<{ nodeUuid: string; force?: boolean }>) {
+    async process(
+        job: Job<{
+            nodeUuid: string;
+            force?: boolean;
+            runtime?: 'all' | 'gost' | 'singbox' | 'xray';
+        }>,
+    ) {
         try {
-            const { nodeUuid, force } = job.data;
+            const { nodeUuid, force, runtime = 'all' } = job.data;
 
             const nodeCheckup = await this.queryBus.execute(new GetNodeByUuidQuery(nodeUuid));
 
@@ -65,7 +81,10 @@ export class StartNodeProcessor extends WorkerHost {
                 CACHE_KEYS.NODE_XRAY_UPTIME(nodeUuid),
             ]);
 
-            if (node.activeInbounds.length === 0 || !node.activeConfigProfileUuid) {
+            if (
+                node.activeInbounds.length === 0 ||
+                (!node.activeConfigProfileUuid && !node.activeSingBoxConfigProfileUuid)
+            ) {
                 this.logger.warn(
                     `Node ${nodeUuid} has no active config profile or inbounds, disabling and clearing profile from node...`,
                 );
@@ -75,6 +94,7 @@ export class StartNodeProcessor extends WorkerHost {
                         uuid: node.uuid,
                         isDisabled: true,
                         activeConfigProfileUuid: null,
+                        activeSingBoxConfigProfileUuid: null,
                         isConnecting: false,
                         isConnected: false,
                         lastStatusMessage: null,
@@ -139,6 +159,34 @@ export class StartNodeProcessor extends WorkerHost {
                 return;
             }
 
+            if (runtime === 'gost') {
+                const gostResult = await reconcileGostForwards(this.prisma, this.axios, node.uuid, {
+                    address: node.address,
+                    port: node.port,
+                    proxyUrl: node.proxyUrl,
+                });
+                const gostFailed =
+                    !gostResult.isOk ||
+                    !gostResult.response.applied ||
+                    (gostResult.response.requiresPortHopping &&
+                        !gostResult.response.portHopping.applied);
+                await this.commandBus.execute(
+                    new UpdateNodeCommand({
+                        uuid: node.uuid,
+                        isConnecting: false,
+                        lastStatusMessage: gostFailed
+                            ? gostResult.isOk
+                                ? (gostResult.response.error ??
+                                  gostResult.response.portHopping.error ??
+                                  'GOST rejected the desired state')
+                                : (gostResult.message ?? 'GOST sync failed')
+                            : null,
+                        lastStatusChange: new Date(),
+                    }),
+                );
+                return;
+            }
+
             let plugin: {
                 uuid: string;
                 config: Record<string, unknown>;
@@ -190,20 +238,6 @@ export class StartNodeProcessor extends WorkerHost {
                 return;
             }
 
-            const startTime = getTime();
-            const config = await this.queryBus.execute(
-                new GetPreparedConfigWithUsersQuery(
-                    node.activeConfigProfileUuid,
-                    node.activeInbounds,
-                ),
-            );
-
-            this.logger.log(`Generated config for node in ${formatExecutionTime(startTime)}`);
-
-            if (!config.isOk) {
-                throw new Error('Failed to get config for node');
-            }
-
             const integrationsResult = await this.queryBus.execute(
                 new GetResolvedIntegrationsQuery(node.integrationUuids),
             );
@@ -218,76 +252,150 @@ export class StartNodeProcessor extends WorkerHost {
                     .filter((integration) => integration !== undefined),
             );
 
-            const reqStartTime = getTime();
-
-            const startNodeResult = await this.axios.startXray(
-                {
-                    xrayConfig: config.response.config as unknown as Record<string, unknown>,
-                    internals: {
-                        hashes: config.response.hashesPayload,
-                        forceRestart: force ?? false,
-                        metadata: {
-                            uuid: node.uuid,
-                            name: node.name,
-                            countryCode: node.countryCode,
-                            id: Number(node.id),
-                            tags: node.tags,
-                        },
-                        integrations: nodeIntegrations,
-                    },
-                },
-                {
-                    address: node.address,
-                    port: node.port,
-                    proxyUrl: node.proxyUrl,
-                },
-            );
-
-            this.logger.log(`Started node in ${formatExecutionTime(reqStartTime)}`);
-
-            if (!startNodeResult.isOk) {
-                await this.commandBus.execute(
-                    new UpdateNodeCommand({
-                        uuid: node.uuid,
-                        lastStatusMessage: startNodeResult.message ?? null,
-                        lastStatusChange: new Date(),
-                        isConnected: false,
-                        isConnecting: false,
-                    }),
+            const healthWithCores =
+                xrayStatusResponse.response as typeof xrayStatusResponse.response & {
+                    cores?: {
+                        singbox: { version: null | string };
+                        gost: { version: null | string };
+                    };
+                };
+            if (node.activeSingBoxConfigProfileUuid && !healthWithCores.cores) {
+                throw new Error(
+                    'This Node does not advertise concurrent-core support; upgrade it before assigning a sing-box profile.',
                 );
-
-                return;
             }
 
-            const nodeResponse = startNodeResult.response;
+            const assignments = [
+                node.activeConfigProfileUuid
+                    ? {
+                          profileUuid: node.activeConfigProfileUuid,
+                          expectedCoreType: CONFIG_PROFILE_CORE_TYPE.XRAY,
+                      }
+                    : null,
+                node.activeSingBoxConfigProfileUuid
+                    ? {
+                          profileUuid: node.activeSingBoxConfigProfileUuid,
+                          expectedCoreType: CONFIG_PROFILE_CORE_TYPE.SINGBOX,
+                      }
+                    : null,
+            ]
+                .filter((assignment) => assignment !== null)
+                .filter(
+                    (assignment) => runtime === 'all' || assignment.expectedCoreType === runtime,
+                );
 
-            await this.rawCacheService.setMany([
-                {
-                    key: CACHE_KEYS.NODE_SYSTEM_INFO(node.uuid),
-                    value: nodeResponse.system.info,
-                },
-                {
-                    key: CACHE_KEYS.NODE_VERSIONS(node.uuid),
-                    value:
-                        nodeResponse.nodeInformation.version && nodeResponse.version
-                            ? {
-                                  xray: nodeResponse.version,
-                                  node: nodeResponse.nodeInformation.version,
-                              }
-                            : null,
-                },
-                {
-                    key: CACHE_KEYS.NODE_SYSTEM_STATS(node.uuid),
-                    value: nodeResponse.system.stats,
-                    ttlSeconds: CACHE_KEYS_TTL.NODE_SYSTEM_STATS,
-                },
-            ]);
+            const startedVersions: { xray?: string; singbox?: string; node?: string } = {};
+            const runtimeErrors: string[] = [];
+            let latestSystem: StartXrayCommand.Response['response']['system'] | undefined;
+
+            for (const assignment of assignments) {
+                const startTime = getTime();
+                const activeInbounds = node.activeInbounds.filter(
+                    (inbound) => inbound.profileUuid === assignment.profileUuid,
+                );
+                const config = await this.queryBus.execute(
+                    new GetPreparedConfigWithUsersQuery(assignment.profileUuid, activeInbounds),
+                );
+
+                this.logger.log(
+                    `Generated ${assignment.expectedCoreType} config for node in ${formatExecutionTime(startTime)}`,
+                );
+
+                if (!config.isOk) {
+                    runtimeErrors.push(`${assignment.expectedCoreType}: failed to build config`);
+                    continue;
+                }
+                if (config.response.coreType !== assignment.expectedCoreType) {
+                    runtimeErrors.push(
+                        `${assignment.expectedCoreType}: profile ${assignment.profileUuid} has core type ${config.response.coreType}`,
+                    );
+                    continue;
+                }
+
+                const reqStartTime = getTime();
+                const startResult = await this.axios.startXray(
+                    {
+                        coreType: config.response.coreType,
+                        xrayConfig: config.response.config as Record<string, unknown>,
+                        internals: {
+                            hashes: config.response.hashesPayload,
+                            forceRestart: force ?? false,
+                            metadata: {
+                                uuid: node.uuid,
+                                name: node.name,
+                                countryCode: node.countryCode,
+                                id: Number(node.id),
+                                tags: node.tags,
+                            },
+                            integrations: nodeIntegrations,
+                        },
+                    },
+                    {
+                        address: node.address,
+                        port: node.port,
+                        proxyUrl: node.proxyUrl,
+                    },
+                );
+
+                this.logger.log(
+                    `Started ${assignment.expectedCoreType} in ${formatExecutionTime(reqStartTime)}`,
+                );
+
+                if (!startResult.isOk || !startResult.response.isStarted) {
+                    runtimeErrors.push(
+                        `${assignment.expectedCoreType}: ${
+                            startResult.isOk
+                                ? (startResult.response.error ?? 'runtime failed to start')
+                                : (startResult.message ?? 'node request failed')
+                        }`,
+                    );
+                    continue;
+                }
+
+                latestSystem = startResult.response.system;
+                startedVersions[assignment.expectedCoreType] =
+                    startResult.response.version ?? undefined;
+                startedVersions.node = startResult.response.nodeInformation.version ?? undefined;
+            }
+
+            const isAnyCoreStarted = Boolean(startedVersions.xray || startedVersions.singbox);
+            const allAssignedCoresStarted = runtimeErrors.length === 0 && isAnyCoreStarted;
+            const xrayVersion = startedVersions.xray ?? xrayStatusResponse.response.xrayVersion;
+            const singboxVersion =
+                startedVersions.singbox ?? healthWithCores.cores?.singbox.version ?? undefined;
+            const gostVersion = healthWithCores.cores?.gost.version ?? undefined;
+
+            if (latestSystem)
+                await this.rawCacheService.setMany([
+                    {
+                        key: CACHE_KEYS.NODE_SYSTEM_INFO(node.uuid),
+                        value: latestSystem.info,
+                    },
+                    {
+                        key: CACHE_KEYS.NODE_VERSIONS(node.uuid),
+                        value:
+                            startedVersions.node && xrayVersion
+                                ? {
+                                      xray: xrayVersion,
+                                      ...(singboxVersion ? { singbox: singboxVersion } : {}),
+                                      ...(gostVersion ? { gost: gostVersion } : {}),
+                                      node: startedVersions.node,
+                                  }
+                                : null,
+                    },
+                    {
+                        key: CACHE_KEYS.NODE_SYSTEM_STATS(node.uuid),
+                        value: latestSystem.stats,
+                        ttlSeconds: CACHE_KEYS_TTL.NODE_SYSTEM_STATS,
+                    },
+                ]);
 
             const updateNodeResult = await this.commandBus.execute(
                 new UpdateNodeCommand({
                     uuid: node.uuid,
-                    isConnected: nodeResponse.isStarted,
-                    lastStatusMessage: nodeResponse.error ?? null,
+                    isConnected:
+                        runtime === 'all' ? isAnyCoreStarted : node.isConnected || isAnyCoreStarted,
+                    lastStatusMessage: runtimeErrors.length > 0 ? runtimeErrors.join(' | ') : null,
                     lastStatusChange: new Date(),
                     isConnecting: false,
                 }),
@@ -298,7 +406,31 @@ export class StartNodeProcessor extends WorkerHost {
                 return;
             }
 
-            if (!node.isConnected && nodeResponse.isStarted) {
+            if (isAnyCoreStarted && runtime === 'all') {
+                const gostResult = await reconcileGostForwards(this.prisma, this.axios, node.uuid, {
+                    address: node.address,
+                    port: node.port,
+                    proxyUrl: node.proxyUrl,
+                });
+                if (
+                    !gostResult.isOk ||
+                    !gostResult.response.applied ||
+                    (gostResult.response.requiresPortHopping &&
+                        !gostResult.response.portHopping.applied)
+                ) {
+                    this.logger.warn(
+                        `GOST post-start reconcile skipped for node ${node.uuid}: ${
+                            gostResult.isOk
+                                ? (gostResult.response.error ??
+                                  gostResult.response.portHopping.error ??
+                                  'runtime rejected configuration')
+                                : (gostResult.message ?? 'node runtime unavailable')
+                        }`,
+                    );
+                }
+            }
+
+            if (!node.isConnected && allAssignedCoresStarted) {
                 this.eventEmitter.emit(
                     EVENTS.NODE.CONNECTION_RESTORED,
                     new NodeEvent(updateNodeResult.response, EVENTS.NODE.CONNECTION_RESTORED),
@@ -308,6 +440,15 @@ export class StartNodeProcessor extends WorkerHost {
             return;
         } catch (error) {
             this.logger.error(`Error handling "${NODES_JOB_NAMES.START_NODE}" job: ${error}`);
+            await this.commandBus.execute(
+                new UpdateNodeCommand({
+                    uuid: job.data.nodeUuid,
+                    isConnecting: false,
+                    isConnected: false,
+                    lastStatusMessage: error instanceof Error ? error.message : String(error),
+                    lastStatusChange: new Date(),
+                }),
+            );
         }
     }
 }

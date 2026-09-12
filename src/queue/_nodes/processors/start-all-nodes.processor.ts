@@ -4,7 +4,6 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger, Scope } from '@nestjs/common';
 import { QueryBus } from '@nestjs/cqrs';
 
-import { NodesEntity } from '@modules/nodes';
 import { FindNodesByCriteriaQuery } from '@modules/nodes/queries/find-nodes-by-criteria';
 
 import { NodesQueuesService } from '@queue/_nodes';
@@ -59,22 +58,13 @@ export class StartAllNodesQueueProcessor extends WorkerHost {
                 this.logger.warn('Force restart all nodes requested.');
             }
 
-            const groupedByProfile = new Map<string, NodesEntity[]>();
-
             for (const node of result.response) {
-                if (!node.activeConfigProfileUuid) {
-                    this.logger.warn(`Node "${node.uuid}" has no active config profile`);
+                if (!node.activeConfigProfileUuid && !node.activeSingBoxConfigProfileUuid) {
+                    this.logger.warn(`Node "${node.uuid}" has no active core profile`);
                     continue;
                 }
-                const nodes = groupedByProfile.get(node.activeConfigProfileUuid) || [];
-                nodes.push(node);
-                groupedByProfile.set(node.activeConfigProfileUuid, nodes);
-            }
-
-            for (const profile of groupedByProfile.keys()) {
-                await this.nodesQueuesService.startAllNodesByProfile({
-                    profileUuid: profile,
-                    emitter: 'StartAllNodesQueueProcessor',
+                await this.nodesQueuesService.startNode({
+                    nodeUuid: node.uuid,
                     force: forceRestart,
                 });
             }

@@ -2,14 +2,19 @@ import { Transactional } from '@nestjs-cls/transactional';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
 import { Injectable, Logger } from '@nestjs/common';
-import { QueryBus } from '@nestjs/cqrs';
+import { CommandBus, QueryBus } from '@nestjs/cqrs';
 
-import { XRayConfig } from '@common/helpers/xray-config';
+import { AxiosService } from '@common/axios';
+import { createCoreConfig } from '@common/helpers/core-config';
 import { RawCacheService } from '@common/raw-cache';
 import { fail, ok, TResult } from '@common/types';
 import { diffInbounds } from '@common/utils/inbounds';
-import { CACHE_KEYS } from '@libs/contracts/constants';
+import { CACHE_KEYS, CONFIG_PROFILE_CORE_TYPE } from '@libs/contracts/constants';
+import type { TConfigProfileCoreType } from '@libs/contracts/constants';
 import { ERRORS } from '@libs/contracts/constants/errors';
+
+import { UpdateNodeCommand } from '@modules/nodes/commands/update-node';
+import { GetNodeByUuidQuery } from '@modules/nodes/queries/get-node-by-uuid';
 
 import { NodesQueuesService } from '@queue/_nodes';
 
@@ -31,6 +36,8 @@ export class ConfigProfileService {
         private readonly configProfileRepository: ConfigProfileRepository,
         private readonly nodesQueuesService: NodesQueuesService,
         private readonly queryBus: QueryBus,
+        private readonly commandBus: CommandBus,
+        private readonly axios: AxiosService,
         private readonly rawCache: RawCacheService,
     ) {}
 
@@ -39,7 +46,8 @@ export class ConfigProfileService {
             const configProfiles = await this.configProfileRepository.getAllConfigProfiles();
 
             for (const configProfile of configProfiles) {
-                configProfile.config = new XRayConfig(
+                configProfile.config = createCoreConfig(
+                    configProfile.coreType as TConfigProfileCoreType,
                     configProfile.config as object,
                 ).getSortedConfig();
             }
@@ -63,7 +71,10 @@ export class ConfigProfileService {
                 return fail(ERRORS.CONFIG_PROFILE_NOT_FOUND);
             }
 
-            configProfile.config = new XRayConfig(configProfile.config as object).getSortedConfig();
+            configProfile.config = createCoreConfig(
+                configProfile.coreType as TConfigProfileCoreType,
+                configProfile.config as object,
+            ).getSortedConfig();
 
             return ok(new GetConfigProfileByUuidResponseModel(configProfile));
         } catch (error) {
@@ -93,7 +104,10 @@ export class ConfigProfileService {
                 snippetsMap.set(snippet.name, snippet.snippet);
             }
 
-            const config = new XRayConfig(configProfile.config as object);
+            const config = createCoreConfig(
+                configProfile.coreType as TConfigProfileCoreType,
+                configProfile.config as object,
+            );
             config.replaceSnippets(snippetsMap);
 
             configProfile.config = config.getSortedConfig();
@@ -113,11 +127,34 @@ export class ConfigProfileService {
                 return fail(ERRORS.CONFIG_PROFILE_NOT_FOUND);
             }
 
-            for (const node of configProfile.nodes) {
-                await this.nodesQueuesService.stopNode({
-                    nodeUuid: node.uuid,
-                    isNeedToBeDeleted: false,
-                });
+            for (const boundNode of configProfile.nodes) {
+                const nodeResult = await this.queryBus.execute(
+                    new GetNodeByUuidQuery(boundNode.uuid),
+                );
+                if (!nodeResult.isOk) continue;
+
+                const node = nodeResult.response;
+                const connectionOpts = {
+                    address: node.address,
+                    port: node.port,
+                    proxyUrl: node.proxyUrl,
+                };
+                const isSingBox = configProfile.coreType === CONFIG_PROFILE_CORE_TYPE.SINGBOX;
+
+                if (isSingBox) await this.axios.stopSingBox(connectionOpts);
+                else await this.axios.stopXray(connectionOpts);
+
+                await this.commandBus.execute(
+                    new UpdateNodeCommand({
+                        uuid: node.uuid,
+                        ...(isSingBox
+                            ? { activeSingBoxConfigProfileUuid: null }
+                            : { activeConfigProfileUuid: null }),
+                        isConnected: isSingBox
+                            ? node.activeConfigProfileUuid !== null
+                            : node.activeSingBoxConfigProfileUuid !== null,
+                    }),
+                );
             }
 
             await this.rawCache.delMany(
@@ -136,17 +173,19 @@ export class ConfigProfileService {
     public async createConfigProfile(
         name: string,
         config: object,
+        coreType: TConfigProfileCoreType = CONFIG_PROFILE_CORE_TYPE.XRAY,
     ): Promise<TResult<GetConfigProfileByUuidResponseModel>> {
         try {
             if (name === 'Default-Profile') {
                 return fail(ERRORS.RESERVED_CONFIG_PROFILE_NAME);
             }
 
-            const validatedConfig = new XRayConfig(config);
+            const validatedConfig = createCoreConfig(coreType, config);
             const sortedConfig = validatedConfig.getSortedConfig();
 
             const profileEntity = new ConfigProfileEntity({
                 name,
+                coreType,
                 config: sortedConfig as object,
             });
 
@@ -195,6 +234,7 @@ export class ConfigProfileService {
         uuid: string,
         name?: string,
         config?: object,
+        coreType?: TConfigProfileCoreType,
     ): Promise<TResult<GetConfigProfileByUuidResponseModel>> {
         try {
             const existingConfigProfile =
@@ -204,13 +244,29 @@ export class ConfigProfileService {
                 return fail(ERRORS.CONFIG_PROFILE_NOT_FOUND);
             }
 
-            if (!name && !config) {
+            if (!name && !config && !coreType) {
                 return fail(ERRORS.NAME_OR_CONFIG_REQUIRED);
             }
 
-            await this.updateConfigProfileTransactional(existingConfigProfile, uuid, name, config);
+            if (
+                coreType &&
+                coreType !== existingConfigProfile.coreType &&
+                existingConfigProfile.nodes.length > 0
+            ) {
+                throw new Error(
+                    'Cannot change the core type of a Config Profile while it is assigned to a Node. Unbind it first.',
+                );
+            }
 
-            if (config) {
+            await this.updateConfigProfileTransactional(
+                existingConfigProfile,
+                uuid,
+                name,
+                config,
+                coreType,
+            );
+
+            if (config || coreType) {
                 // No need for now
                 // await this.commandBus.execute(new SyncActiveProfileCommand());
 
@@ -260,20 +316,26 @@ export class ConfigProfileService {
         uuid: string,
         name?: string,
         config?: object,
+        coreType?: TConfigProfileCoreType,
     ): Promise<boolean> {
         const configProfileEntity = new ConfigProfileEntity({
             uuid,
             name,
         });
 
-        if (config) {
+        if (config || coreType) {
             const existingInbounds = existingConfigProfile.inbounds;
 
-            const validatedConfig = new XRayConfig(config);
+            const nextCoreType =
+                coreType ?? (existingConfigProfile.coreType as TConfigProfileCoreType);
+            const validatedConfig = createCoreConfig(
+                nextCoreType,
+                config ?? (existingConfigProfile.config as object),
+            );
 
             validatedConfig.cleanInboundClients(false);
             validatedConfig.fixIncorrectServerNames();
-            validatedConfig.validateOutbounds();
+            validatedConfig.validateOutbounds?.();
 
             const sortedConfig = validatedConfig.getSortedConfig();
             const inbounds = validatedConfig.getAllInbounds();
@@ -294,6 +356,7 @@ export class ConfigProfileService {
             await this.syncInbounds(existingInbounds, inboundsEntities);
 
             configProfileEntity.config = sortedConfig as object;
+            configProfileEntity.coreType = nextCoreType;
         }
 
         await this.configProfileRepository.update(configProfileEntity);

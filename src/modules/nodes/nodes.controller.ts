@@ -170,7 +170,11 @@ export class NodesController {
         httpCode: HttpStatus.ACCEPTED,
     })
     async restartNode(@Param() param: RestartNodeParamDto, @Body() body: RestartNodeBodyDto) {
-        const res = await this.nodesService.restartNode(param.uuid, body.forceRestart);
+        const res = await this.nodesService.restartNode(
+            param.uuid,
+            body.forceRestart,
+            body.runtime ?? 'all',
+        );
         errorHandler(res);
         return;
     }

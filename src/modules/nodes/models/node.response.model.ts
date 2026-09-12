@@ -5,7 +5,7 @@ import { ConfigProfileInboundEntity } from '@modules/config-profiles/entities';
 import { InfraProviderEntity } from '@modules/infra-billing/entities';
 
 import { NodesEntity } from '../entities';
-import { INodeHotCache, INodeSystem, INodeVersions } from '../interfaces';
+import { INodeHotCache, INodeRuntimeHealth, INodeSystem, INodeVersions } from '../interfaces';
 
 export class NodeResponseModel {
     public uuid: string;
@@ -37,6 +37,7 @@ export class NodeResponseModel {
 
     public configProfile: {
         activeConfigProfileUuid: string | null;
+        activeSingBoxConfigProfileUuid: string | null;
         activeInbounds: ConfigProfileInboundEntity[];
     };
     public providerUuid: string | null;
@@ -47,6 +48,7 @@ export class NodeResponseModel {
     public usersOnline: number;
     public system: INodeSystem | null;
     public versions: INodeVersions | null;
+    public runtimeHealth: INodeRuntimeHealth | null;
 
     constructor(data: NodesEntity, hotCache: INodeHotCache) {
         this.uuid = data.uuid;
@@ -79,6 +81,7 @@ export class NodeResponseModel {
 
         this.configProfile = {
             activeConfigProfileUuid: data.activeConfigProfileUuid,
+            activeSingBoxConfigProfileUuid: data.activeSingBoxConfigProfileUuid,
             activeInbounds: data.activeInbounds,
         };
 
@@ -89,6 +92,7 @@ export class NodeResponseModel {
         this.system = hotCache.system;
         this.usersOnline = hotCache.onlineUsers;
         this.versions = hotCache.versions;
+        this.runtimeHealth = hotCache.runtimeHealth;
         this.xrayUptime = hotCache.xrayUptime;
     }
 }

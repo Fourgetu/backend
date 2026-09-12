@@ -52,6 +52,13 @@ export namespace UpdateNodeCommand {
                 activeInbounds: z.array(z.uuid()),
             })
             .optional(),
+        singBoxConfigProfile: z
+            .object({
+                activeConfigProfileUuid: z.uuid(),
+                activeInbounds: z.array(z.uuid()),
+            })
+            .nullable()
+            .optional(),
 
         providerUuid: z.uuid().nullish(),
         tags: z.optional(

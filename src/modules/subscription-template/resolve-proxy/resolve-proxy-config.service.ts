@@ -12,9 +12,10 @@ import {
     WebSocketConfig,
 } from 'xray-typed';
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 
 import { TypedConfigService } from '@common/config/app-config';
+import { PrismaService } from '@common/database/prisma.service';
 import {
     resolveEncryptionFromDecryption,
     resolveInboundAndMlDsa65PublicKey,
@@ -60,14 +61,47 @@ export interface IResolveProxyConfigOptions {
     excludeHostsByTags?: ISRRContext['excludeHostsByTags'];
 }
 
+interface SingBoxInboundConfig {
+    type?: string;
+    tls?: {
+        enabled?: boolean;
+        server_name?: string;
+        alpn?: string | string[];
+    };
+    obfs?: {
+        type?: string;
+        password?: string;
+    };
+    up_mbps?: number;
+    down_mbps?: number;
+}
+
+interface ResolvedUserRoute {
+    configProfileInboundUuid: string;
+    externalPort: number;
+    hopEndPort: number | null;
+    hopStartPort: number | null;
+    hostUuid: string;
+    network: string;
+    nodeUuid: string;
+    portHoppingConfig: null | {
+        enabled: boolean;
+        hopIntervalSeconds: number;
+    };
+}
+
 @Injectable()
 export class ResolveProxyConfigService {
+    private readonly logger = new Logger(ResolveProxyConfigService.name);
     private readonly nanoid: ReturnType<typeof customAlphabet>;
     private readonly subPublicDomain: string;
     private readonly domainRegex =
         /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
 
-    constructor(private readonly configService: TypedConfigService) {
+    constructor(
+        private readonly configService: TypedConfigService,
+        private readonly prisma: PrismaService,
+    ) {
         this.nanoid = customAlphabet('0123456789abcdefghjkmnopqrstuvwxyz', 10);
         this.subPublicDomain = this.configService.getOrThrow('SUB_PUBLIC_DOMAIN');
     }
@@ -112,6 +146,27 @@ export class ResolveProxyConfigService {
         const knownRemarks = new Map<string, number>();
         const resolvedProxyConfigs: ResolvedProxyConfig[] = [];
 
+        // A UserRoute changes only the public connection port. Keep this lookup outside the
+        // host loop so a subscription request never performs one database query per host.
+        const userRoutes = await this.prisma.userRoutes.findMany({
+            where: {
+                userId: user.id,
+                enabled: true,
+            },
+            select: {
+                hostUuid: true,
+                configProfileInboundUuid: true,
+                externalPort: true,
+                network: true,
+                nodeUuid: true,
+                hopStartPort: true,
+                hopEndPort: true,
+                portHoppingConfig: {
+                    select: { enabled: true, hopIntervalSeconds: true },
+                },
+            },
+        });
+
         const userValueMap = TemplateEngine.createUserValueMap(
             user,
             subscriptionSettings,
@@ -126,11 +181,13 @@ export class ResolveProxyConfigService {
                 knownRemarks,
             );
 
+            const userRoute = this.resolveUserRoute(inputHost, userRoutes);
             const resolvedProxyConfig = this.buildResolvedProxyConfig({
                 inputHost,
                 inbound: inputHost.rawInbound as InboundConfig,
                 finalRemark,
                 user,
+                userRoute,
                 publicKeyMap,
                 mldsa65PublicKeyMap,
                 encryptionMap,
@@ -490,6 +547,36 @@ export class ResolveProxyConfigService {
         user: UserEntity,
         encryption?: string,
     ): ProtocolVariant | null {
+        const singBoxType = (inbound as unknown as { type?: string }).type;
+        if (singBoxType === 'hysteria2') {
+            return {
+                protocol: 'hysteria',
+                protocolOptions: {
+                    version: 2,
+                },
+            };
+        }
+
+        if (singBoxType === 'anytls') {
+            return {
+                protocol: 'anytls',
+                protocolOptions: {
+                    password: user.vlessUuid,
+                },
+            };
+        }
+
+        if (singBoxType === 'socks') {
+            return {
+                protocol: 'socks',
+                protocolOptions: {
+                    username: user.socksUsername,
+                    password: user.socksPassword,
+                    version: 5,
+                },
+            };
+        }
+
         if (!inbound.settings) {
             return null;
         }
@@ -536,6 +623,15 @@ export class ResolveProxyConfigService {
                         version: 2,
                     },
                 };
+            case 'socks':
+                return {
+                    protocol: 'socks',
+                    protocolOptions: {
+                        username: user.socksUsername,
+                        password: user.socksPassword,
+                        version: 5,
+                    },
+                };
             default:
                 return null;
         }
@@ -546,6 +642,7 @@ export class ResolveProxyConfigService {
         inbound: InboundConfig;
         finalRemark: string;
         user: UserEntity;
+        userRoute: ResolvedUserRoute | null;
         publicKeyMap: Map<string, string>;
         mldsa65PublicKeyMap: Map<string, string>;
         encryptionMap: Map<string, string>;
@@ -565,28 +662,53 @@ export class ResolveProxyConfigService {
             return null;
         }
 
-        const transport = this.resolveTransport(inbound.streamSettings, inputHost, protocol, {
-            vlessUuid: user.vlessUuid,
-        });
+        const singBoxInbound = inbound as unknown as SingBoxInboundConfig;
+        const isSingBoxHysteria2 = singBoxInbound.type === 'hysteria2';
+        const isSingBoxAnyTls = singBoxInbound.type === 'anytls';
 
-        const security = this.resolveSecurity(
-            inbound.streamSettings,
-            inputHost,
-            inbound.tag!,
-            ctx.publicKeyMap,
-            ctx.mldsa65PublicKeyMap,
-            address,
+        const transport = isSingBoxHysteria2
+            ? ({
+                  transport: 'hysteria',
+                  transportOptions: {
+                      version: 2,
+                      auth: user.vlessUuid,
+                  },
+              } satisfies HysteriaTransport)
+            : isSingBoxAnyTls
+              ? ({
+                    transport: 'tcp',
+                    transportOptions: { header: null },
+                } satisfies TcpTransport)
+              : this.resolveTransport(inbound.streamSettings, inputHost, protocol, {
+                    vlessUuid: user.vlessUuid,
+                });
+
+        const security =
+            isSingBoxHysteria2 || isSingBoxAnyTls
+                ? this.resolveSingBoxTlsSecurity(singBoxInbound, inputHost, address)
+                : this.resolveSecurity(
+                      inbound.streamSettings,
+                      inputHost,
+                      inbound.tag!,
+                      ctx.publicKeyMap,
+                      ctx.mldsa65PublicKeyMap,
+                      address,
+                  );
+
+        const runtimeFinalMask = isSingBoxHysteria2
+            ? this.resolveSingBoxHysteriaFinalMask(singBoxInbound)
+            : toNonEmptyRecord(inbound.streamSettings?.finalmask);
+        const resolvedFinalMask = this.applyUserRoutePortHopping(
+            override(toNonEmptyRecord(inputHost.finalMask), runtimeFinalMask),
+            isSingBoxHysteria2 ? ctx.userRoute : null,
         );
 
         return {
             finalRemark: finalRemark,
             address: address,
-            port: inputHost.port,
+            port: ctx.userRoute?.externalPort ?? inputHost.port,
             streamOverrides: {
-                finalMask: override(
-                    toNonEmptyRecord(inputHost.finalMask),
-                    toNonEmptyRecord(inbound.streamSettings?.finalmask),
-                ),
+                finalMask: resolvedFinalMask,
                 sockopt: toNonEmptyRecord(inputHost.sockoptParams),
             },
             mux: toNonEmptyRecord(inputHost.muxParams),
@@ -618,6 +740,144 @@ export class ResolveProxyConfigService {
             ...security,
             ...transport,
         } satisfies ResolvedProxyConfig;
+    }
+
+    private resolveSingBoxTlsSecurity(
+        inbound: SingBoxInboundConfig,
+        inputHost: HostWithRawInbound,
+        resolvedAddress: string,
+    ): SecurityVariant {
+        if (!inbound.tls?.enabled) return { security: 'none' };
+
+        const defaultAlpn = inbound.type === 'hysteria2' ? 'h3' : '';
+        const runtimeAlpn = Array.isArray(inbound.tls.alpn)
+            ? inbound.tls.alpn.join(',')
+            : (inbound.tls.alpn ?? defaultAlpn);
+
+        return {
+            security: 'tls',
+            securityOptions: {
+                alpn: override(inputHost.alpn, runtimeAlpn) ?? defaultAlpn,
+                enableSessionResumption: false,
+                fingerprint: inputHost.fingerprint ?? 'chrome',
+                serverName: this.resolveFinalServerName(
+                    inputHost,
+                    inbound.tls.server_name,
+                    resolvedAddress,
+                ),
+                echConfigList: null,
+                echForceQuery: null,
+                echSockopt: null,
+                pinnedPeerCertSha256: inputHost.pinnedPeerCertSha256,
+                verifyPeerCertByName: inputHost.verifyPeerCertByName,
+                cipherSuites: null,
+            },
+        };
+    }
+
+    private resolveSingBoxHysteriaFinalMask(
+        inbound: SingBoxInboundConfig,
+    ): Record<string, unknown> | null {
+        const finalMask: Record<string, unknown> = {};
+
+        if (inbound.obfs?.type === 'salamander' && inbound.obfs.password) {
+            finalMask.udp = [
+                {
+                    type: 'salamander',
+                    settings: { password: inbound.obfs.password },
+                },
+            ];
+        }
+
+        if (inbound.up_mbps || inbound.down_mbps) {
+            finalMask.quicParams = {
+                ...(inbound.up_mbps && { brutalUp: inbound.up_mbps }),
+                ...(inbound.down_mbps && { brutalDown: inbound.down_mbps }),
+            };
+        }
+
+        return Object.keys(finalMask).length > 0 ? finalMask : null;
+    }
+
+    private applyUserRoutePortHopping(
+        finalMask: Record<string, unknown> | null,
+        route: ResolvedUserRoute | null,
+    ): Record<string, unknown> | null {
+        if (
+            !route?.portHoppingConfig?.enabled ||
+            route.hopStartPort === null ||
+            route.hopEndPort === null
+        ) {
+            return finalMask;
+        }
+
+        const existingQuicParams =
+            finalMask?.quicParams &&
+            typeof finalMask.quicParams === 'object' &&
+            !Array.isArray(finalMask.quicParams)
+                ? (finalMask.quicParams as Record<string, unknown>)
+                : {};
+
+        return {
+            ...finalMask,
+            quicParams: {
+                ...existingQuicParams,
+                udpHop: {
+                    ports: `${route.hopStartPort}-${route.hopEndPort}`,
+                    interval: `${route.portHoppingConfig.hopIntervalSeconds}s`,
+                },
+            },
+        };
+    }
+
+    private resolveUserRoute(
+        inputHost: HostWithRawInbound,
+        routes: ResolvedUserRoute[],
+    ): ResolvedUserRoute | null {
+        if (!inputHost.configProfileInboundUuid) return null;
+
+        const inbound = inputHost.rawInbound as Partial<InboundConfig> | null;
+        const network = this.resolveUserRouteNetwork(inbound);
+        const candidates = routes.filter(
+            (route) =>
+                route.hostUuid === inputHost.uuid &&
+                route.configProfileInboundUuid === inputHost.configProfileInboundUuid &&
+                route.network === network,
+        );
+
+        if (candidates.length === 0) return null;
+
+        // Hosts can be attached to more than one Node, while the current subscription contract
+        // does not carry a node discriminator. Never guess between different external ports.
+        const routeSignatures = new Set(
+            candidates.map(
+                (route) =>
+                    `${route.externalPort}:${route.hopStartPort ?? ''}:${route.hopEndPort ?? ''}:` +
+                    `${route.portHoppingConfig?.enabled ? route.portHoppingConfig.hopIntervalSeconds : ''}`,
+            ),
+        );
+        if (routeSignatures.size > 1) {
+            this.logger.warn(
+                `Skipping UserRoute port override for host ${inputHost.uuid}: ` +
+                    `${candidates.length} node routes resolve to different port allocations.`,
+            );
+            return null;
+        }
+
+        return candidates[0];
+    }
+
+    private resolveUserRouteNetwork(inbound: Partial<InboundConfig> | null): 'tcp' | 'udp' {
+        if (!inbound) return 'tcp';
+
+        if (
+            inbound.protocol === 'hysteria' ||
+            (inbound as unknown as { type?: string }).type === 'hysteria2'
+        )
+            return 'udp';
+
+        const network = (inbound.streamSettings as { network?: string } | undefined)?.network;
+        return network === 'hysteria' || network === 'quic' ? 'udp' : 'tcp';
     }
 
     private resolveRandomizedValue(value: string): string {

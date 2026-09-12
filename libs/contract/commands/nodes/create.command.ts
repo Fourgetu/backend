@@ -50,6 +50,12 @@ export namespace CreateNodeCommand {
             activeConfigProfileUuid: z.uuid(),
             activeInbounds: z.array(z.uuid()),
         }),
+        singBoxConfigProfile: z
+            .object({
+                activeConfigProfileUuid: z.uuid(),
+                activeInbounds: z.array(z.uuid()),
+            })
+            .optional(),
 
         providerUuid: z.uuid().nullish(),
         tags: z.optional(

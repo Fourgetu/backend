@@ -39,6 +39,7 @@ const entityToModel = (entity: NodesEntity): Nodes => {
         ips: entity.ips,
 
         activeConfigProfileUuid: entity.activeConfigProfileUuid,
+        activeSingBoxConfigProfileUuid: entity.activeSingBoxConfigProfileUuid,
         providerUuid: entity.providerUuid,
         activePluginUuid: entity.activePluginUuid,
         note: entity.note,
