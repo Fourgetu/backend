@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 
+import { AxiosModule } from '@common/axios';
+
 import { ConfigProfileController } from './config-profile.controller';
 import { ConfigProfileService } from './config-profile.service';
 import { ConfigProfileConverter, SnippetsConverter } from './converters';
@@ -11,7 +13,7 @@ import { SnippetsController } from './snippets.controller';
 import { SnippetsService } from './snippets.service';
 
 @Module({
-    imports: [CqrsModule],
+    imports: [AxiosModule, CqrsModule],
     controllers: [ConfigProfileController, SnippetsController],
     providers: [
         ConfigProfileRepository,

@@ -11,7 +11,7 @@ export namespace ReallocateUserRoutePortCommand {
         USER_ROUTES_ROUTES.REALLOCATE_PORT(':uuid'),
         'post',
         'Reallocate user route external port',
-        { scope: 'update', kind: 'write' },
+        { scope: 'reallocate-port', kind: 'write' },
     );
     export const RequestParamSchema = z.object({ uuid: z.uuid() });
     export const ResponseSchema = z.object({ response: UserRouteSchema });

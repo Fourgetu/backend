@@ -20,7 +20,7 @@ export namespace GetPortHoppingConfigsCommand {
         USER_ROUTES_ROUTES.PORT_HOPPING_CONFIGS,
         'get',
         'Get Hysteria2 port hopping configs',
-        { scope: 'read', kind: 'read' },
+        { scope: 'list-port-hopping-configs', kind: 'read' },
     );
     export const RequestQuerySchema = z.object({ configProfileInboundUuid: z.uuid().optional() });
     export const ResponseSchema = z.object({ response: z.array(PortHoppingConfigSchema) });
@@ -33,7 +33,7 @@ export namespace CreatePortHoppingConfigCommand {
         USER_ROUTES_ROUTES.PORT_HOPPING_CONFIGS,
         'post',
         'Create Hysteria2 port hopping config',
-        { scope: 'create', kind: 'write' },
+        { scope: 'create-port-hopping-config', kind: 'write' },
     );
     export const RequestBodySchema = z.object({
         configProfileInboundUuid: z.uuid(),
@@ -49,7 +49,7 @@ export namespace UpdatePortHoppingConfigCommand {
         USER_ROUTES_ROUTES.PORT_HOPPING_CONFIG(':uuid'),
         'patch',
         'Update Hysteria2 port hopping config',
-        { scope: 'update', kind: 'write' },
+        { scope: 'update-port-hopping-config', kind: 'write' },
     );
     export const RequestParamSchema = z.object({ uuid: z.uuid() });
     export const RequestBodySchema = z.object(fields).partial();
@@ -63,7 +63,7 @@ export namespace DeletePortHoppingConfigCommand {
         USER_ROUTES_ROUTES.PORT_HOPPING_CONFIG(':uuid'),
         'delete',
         'Delete Hysteria2 port hopping config',
-        { scope: 'delete', kind: 'write' },
+        { scope: 'delete-port-hopping-config', kind: 'write' },
     );
     export const RequestParamSchema = z.object({ uuid: z.uuid() });
     export const ResponseSchema = z.object({ response: z.boolean() });

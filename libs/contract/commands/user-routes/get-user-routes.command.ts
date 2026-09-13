@@ -11,7 +11,7 @@ export namespace GetUserRoutesCommand {
         USER_ROUTES_ROUTES.GET,
         'get',
         'Get user routes',
-        { scope: 'read', kind: 'read' },
+        { scope: 'list', kind: 'read' },
     );
     export const RequestQuerySchema = z.object({
         userId: z.coerce.number().int().positive().optional(),

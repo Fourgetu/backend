@@ -1,7 +1,8 @@
+import { z } from 'zod';
+
 import { REST_API, SPEED_LIMITS_ROUTES } from '../../api';
 import { getEndpointDetails } from '../../constants';
 import { SpeedLimitSchema } from '../../models';
-import { z } from 'zod';
 
 export namespace GetSpeedLimitsCommand {
     export const url = REST_API.SPEED_LIMITS.GET;
@@ -10,7 +11,7 @@ export namespace GetSpeedLimitsCommand {
         SPEED_LIMITS_ROUTES.GET,
         'get',
         'Get speed limits',
-        { scope: 'read', kind: 'read' },
+        { scope: 'list', kind: 'read' },
     );
     export const ResponseSchema = z.object({ response: z.array(SpeedLimitSchema) });
     export type Response = z.infer<typeof ResponseSchema>;

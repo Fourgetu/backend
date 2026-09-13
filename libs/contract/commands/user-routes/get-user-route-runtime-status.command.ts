@@ -10,7 +10,7 @@ export namespace GetUserRouteRuntimeStatusCommand {
         USER_ROUTES_ROUTES.RUNTIME_STATUS(':nodeUuid'),
         'get',
         'Get user route GOST runtime status',
-        { scope: 'read', kind: 'read' },
+        { scope: 'runtime-status', kind: 'read' },
     );
     export const RequestParamSchema = z.object({ nodeUuid: z.uuid() });
     export const ResponseSchema = z.object({
