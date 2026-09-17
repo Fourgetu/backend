@@ -3,7 +3,7 @@ name: Build&Push OpenAPI Specs
 on:
   push:
     tags:
-      - '*'
+      - 'v*'
 
   workflow_dispatch:
 

@@ -3,7 +3,7 @@ name: Build&Push Release Docker Image
 on:
   push:
     tags:
-      - '*'
+      - 'v*'
 
   workflow_dispatch:
 
