@@ -19,6 +19,7 @@ import { UserRouteEntity } from './entities';
 import { PortRangeAllocator } from './port-range-allocator.service';
 import { UserRoutesRepository } from './repositories';
 import { isHostCompatibleWithUserRoute } from './user-route-host-compatibility';
+import { isUserRouteListenerAllowed } from './user-route-listener';
 
 const DEFAULT_PORT_START = 32000;
 const DEFAULT_PORT_END = 32999;
@@ -406,7 +407,13 @@ export class UserRoutesService implements OnApplicationBootstrap {
             this.prisma.nodes.findUnique({ where: { uuid: dto.nodeUuid }, select: { uuid: true } }),
             this.prisma.configProfileInbounds.findUnique({
                 where: { uuid: dto.configProfileInboundUuid },
-                select: { uuid: true, profileUuid: true, port: true, rawInbound: true },
+                select: {
+                    uuid: true,
+                    profileUuid: true,
+                    port: true,
+                    rawInbound: true,
+                    profile: { select: { coreType: true } },
+                },
             }),
             this.prisma.hosts.findUnique({
                 where: { uuid: dto.hostUuid },
@@ -477,14 +484,17 @@ export class UserRoutesService implements OnApplicationBootstrap {
 
         const rawInbound = inbound.rawInbound as { listen?: unknown } | null;
         if (
-            !rawInbound ||
-            typeof rawInbound.listen !== 'string' ||
-            !['127.0.0.1', '::1'].includes(rawInbound.listen)
+            !isUserRouteListenerAllowed({
+                listen: rawInbound?.listen,
+                coreType: inbound.profile.coreType,
+                internalAddress: dto.internalAddress,
+                allowPublicInbound: dto.allowPublicInbound,
+            })
         ) {
             return fail({
                 code: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
                 message:
-                    'Selected proxy-core inbound is not in GOST limiter mode: its listen address must explicitly be 127.0.0.1 or ::1',
+                    'GOST requires a matching loopback listener, or explicit public-inbound compatibility for Xray listening on 0.0.0.0 with target 127.0.0.1',
                 httpCode: 400,
             });
         }
