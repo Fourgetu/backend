@@ -15,67 +15,76 @@ export namespace CreateNodeCommand {
         { scope: 'create', kind: 'write' },
     );
 
-    export const RequestBodySchema = z.object({
-        name: z.string().min(3).max(30),
-        address: z.string().min(2),
-        port: z.int().min(1).max(65535).optional(),
-        proxyUrl: z
-            .string()
-            .regex(
-                /^socks5:\/\/(?:[^:@/\s]+(?::[^@/\s]*)?@)?[^:@/\s]+:\d{1,5}$/,
-                'Expected socks5://[user:pass@]host:port',
-            )
-            .nullish(),
-        isTrafficTrackingActive: z.boolean().optional().default(false),
-        trafficLimitBytes: z.number().min(0).optional(),
-        notifyPercent: z.int().min(0).max(100).optional(),
-        trafficResetDay: z.int().min(1).max(31).optional(),
-        countryCode: z.string().max(2).toUpperCase().default('XX'),
-        consumptionMultiplier: z.optional(
-            z
-                .number()
-                .min(0.0)
-                .max(100.0)
-                .transform((n) => Number(n.toFixed(1))),
-        ),
-        nodeConsumptionMultiplier: z.optional(
-            z
-                .number()
-                .min(0.0)
-                .max(100.0)
-                .transform((n) => Number(n.toFixed(1))),
-        ),
-
-        configProfile: z.object({
-            activeConfigProfileUuid: z.uuid(),
-            activeInbounds: z.array(z.uuid()),
-        }),
-        singBoxConfigProfile: z
-            .object({
-                activeConfigProfileUuid: z.uuid(),
-                activeInbounds: z.array(z.uuid()),
-            })
-            .optional(),
-
-        providerUuid: z.uuid().nullish(),
-        tags: z.optional(
-            z
-                .array(
-                    z
-                        .string()
-                        .regex(
-                            /^[A-Z0-9_:]+$/,
-                            'Tag can only contain uppercase letters, numbers, underscores and colons',
-                        )
-                        .max(36, 'Each tag must be less than 36 characters'),
+    export const RequestBodySchema = z
+        .object({
+            name: z.string().min(3).max(30),
+            address: z.string().min(2),
+            port: z.int().min(1).max(65535).optional(),
+            proxyUrl: z
+                .string()
+                .regex(
+                    /^socks5:\/\/(?:[^:@/\s]+(?::[^@/\s]*)?@)?[^:@/\s]+:\d{1,5}$/,
+                    'Expected socks5://[user:pass@]host:port',
                 )
-                .max(10, 'Maximum 10 tags'),
-        ),
-        activePluginUuid: z.optional(z.nullable(z.uuid())),
-        integrationUuids: z.optional(z.array(z.uuid()).max(20, 'Maximum 20 integrations')),
-        note: z.optional(z.string().max(255, 'Note must be less than 255 characters')),
-        ips: z.optional(NodeIpsSchema),
-    });
+                .nullish(),
+            isTrafficTrackingActive: z.boolean().optional().default(false),
+            trafficLimitBytes: z.number().min(0).optional(),
+            notifyPercent: z.int().min(0).max(100).optional(),
+            trafficResetDay: z.int().min(1).max(31).optional(),
+            countryCode: z.string().max(2).toUpperCase().default('XX'),
+            consumptionMultiplier: z.optional(
+                z
+                    .number()
+                    .min(0.0)
+                    .max(100.0)
+                    .transform((n) => Number(n.toFixed(1))),
+            ),
+            nodeConsumptionMultiplier: z.optional(
+                z
+                    .number()
+                    .min(0.0)
+                    .max(100.0)
+                    .transform((n) => Number(n.toFixed(1))),
+            ),
+
+            configProfile: z
+                .object({
+                    activeConfigProfileUuid: z.uuid(),
+                    activeInbounds: z.array(z.uuid()),
+                })
+                .nullable()
+                .optional(),
+            singBoxConfigProfile: z
+                .object({
+                    activeConfigProfileUuid: z.uuid(),
+                    activeInbounds: z.array(z.uuid()),
+                })
+                .nullable()
+                .optional(),
+
+            providerUuid: z.uuid().nullish(),
+            tags: z.optional(
+                z
+                    .array(
+                        z
+                            .string()
+                            .regex(
+                                /^[A-Z0-9_:]+$/,
+                                'Tag can only contain uppercase letters, numbers, underscores and colons',
+                            )
+                            .max(36, 'Each tag must be less than 36 characters'),
+                    )
+                    .max(10, 'Maximum 10 tags'),
+            ),
+            activePluginUuid: z.optional(z.nullable(z.uuid())),
+            integrationUuids: z.optional(z.array(z.uuid()).max(20, 'Maximum 20 integrations')),
+            note: z.optional(z.string().max(255, 'Note must be less than 255 characters')),
+            ips: z.optional(NodeIpsSchema),
+        })
+        .refine((body) => body.configProfile || body.singBoxConfigProfile, {
+            message: 'At least one Xray or sing-box Config Profile is required.',
+            path: ['configProfile'],
+        });
 
     export const ResponseSchema = NodeResponseSchema;
 

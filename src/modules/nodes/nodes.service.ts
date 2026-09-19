@@ -54,7 +54,7 @@ export class NodesService {
                 trafficLimitBytes: wrapBigInt(nodeData.trafficLimitBytes),
                 consumptionMultiplier: mapDefined(nodeData.consumptionMultiplier, toNano),
                 nodeConsumptionMultiplier: mapDefined(nodeData.nodeConsumptionMultiplier, toNano),
-                activeConfigProfileUuid: configProfile.activeConfigProfileUuid,
+                activeConfigProfileUuid: configProfile?.activeConfigProfileUuid ?? null,
                 activeSingBoxConfigProfileUuid:
                     singBoxConfigProfile?.activeConfigProfileUuid ?? null,
             });
@@ -62,10 +62,12 @@ export class NodesService {
             const result = await this.nodesRepository.create(nodeEntity);
 
             const bindings = [
-                {
-                    binding: configProfile,
-                    expectedCoreType: CONFIG_PROFILE_CORE_TYPE.XRAY,
-                },
+                configProfile
+                    ? {
+                          binding: configProfile,
+                          expectedCoreType: CONFIG_PROFILE_CORE_TYPE.XRAY,
+                      }
+                    : null,
                 singBoxConfigProfile
                     ? {
                           binding: singBoxConfigProfile,
@@ -328,6 +330,14 @@ export class NodesService {
                 }
             }
 
+            if (configProfile === null) {
+                for (const inbound of node.activeInbounds) {
+                    if (inbound.profileUuid === node.activeConfigProfileUuid) {
+                        nextInboundUuids.delete(inbound.uuid);
+                    }
+                }
+            }
+
             if (configProfile !== undefined || singBoxConfigProfile !== undefined) {
                 await this.nodesRepository.removeInboundsFromNode(node.uuid);
                 await this.nodesRepository.addInboundsToNode(node.uuid, [...nextInboundUuids]);
@@ -339,7 +349,8 @@ export class NodesService {
                 trafficLimitBytes: wrapBigInt(nodeData.trafficLimitBytes),
                 consumptionMultiplier: mapDefined(nodeData.consumptionMultiplier, toNano),
                 nodeConsumptionMultiplier: mapDefined(nodeData.nodeConsumptionMultiplier, toNano),
-                activeConfigProfileUuid: configProfile?.activeConfigProfileUuid,
+                activeConfigProfileUuid:
+                    configProfile === null ? null : configProfile?.activeConfigProfileUuid,
                 activeSingBoxConfigProfileUuid:
                     singBoxConfigProfile === null
                         ? null

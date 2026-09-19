@@ -13,12 +13,7 @@ import { PrismaService } from '@common/database/prisma.service';
 import { reconcileGostForwards } from '@common/gost-runtime/reconcile-gost-forwards';
 import { RawCacheService } from '@common/raw-cache';
 import { formatExecutionTime, getTime } from '@common/utils/get-elapsed-time';
-import {
-    CACHE_KEYS,
-    CACHE_KEYS_TTL,
-    CONFIG_PROFILE_CORE_TYPE,
-    EVENTS,
-} from '@libs/contracts/constants';
+import { CACHE_KEYS, CACHE_KEYS_TTL, EVENTS } from '@libs/contracts/constants';
 
 import { NodeEvent } from '@integration-modules/notifications/interfaces';
 
@@ -33,6 +28,7 @@ import { QUEUES_NAMES } from '@queue/queue.enum';
 
 import { NODES_JOB_NAMES } from '../constants/nodes-job-name.constant';
 import { NodesQueuesService } from '../nodes-queues.service';
+import { getCoreProfileAssignments } from './core-profile-assignments';
 
 @Processor(QUEUES_NAMES.NODES.START, {
     concurrency: 40,
@@ -265,24 +261,7 @@ export class StartNodeProcessor extends WorkerHost {
                 );
             }
 
-            const assignments = [
-                node.activeConfigProfileUuid
-                    ? {
-                          profileUuid: node.activeConfigProfileUuid,
-                          expectedCoreType: CONFIG_PROFILE_CORE_TYPE.XRAY,
-                      }
-                    : null,
-                node.activeSingBoxConfigProfileUuid
-                    ? {
-                          profileUuid: node.activeSingBoxConfigProfileUuid,
-                          expectedCoreType: CONFIG_PROFILE_CORE_TYPE.SINGBOX,
-                      }
-                    : null,
-            ]
-                .filter((assignment) => assignment !== null)
-                .filter(
-                    (assignment) => runtime === 'all' || assignment.expectedCoreType === runtime,
-                );
+            const assignments = getCoreProfileAssignments(node, runtime);
 
             const startedVersions: { xray?: string; singbox?: string; node?: string } = {};
             const runtimeErrors: string[] = [];
@@ -290,11 +269,11 @@ export class StartNodeProcessor extends WorkerHost {
 
             for (const assignment of assignments) {
                 const startTime = getTime();
-                const activeInbounds = node.activeInbounds.filter(
-                    (inbound) => inbound.profileUuid === assignment.profileUuid,
-                );
                 const config = await this.queryBus.execute(
-                    new GetPreparedConfigWithUsersQuery(assignment.profileUuid, activeInbounds),
+                    new GetPreparedConfigWithUsersQuery(
+                        assignment.profileUuid,
+                        assignment.activeInbounds,
+                    ),
                 );
 
                 this.logger.log(
