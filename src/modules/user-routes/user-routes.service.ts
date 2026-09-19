@@ -17,6 +17,7 @@ import { CreateUserRouteBodyDto, GetUserRoutesQueryDto, UpdateUserRouteBodyDto }
 import { UserRouteEntity } from './entities';
 import { UserRoutesRepository } from './repositories';
 import { PortRangeAllocator } from './port-range-allocator.service';
+import { isHostCompatibleWithUserRoute } from './user-route-host-compatibility';
 
 const DEFAULT_PORT_START = 32000;
 const DEFAULT_PORT_END = 32999;
@@ -394,7 +395,7 @@ export class UserRoutesService implements OnApplicationBootstrap {
     }
 
     private async validateReferences(dto: CreateUserRouteBodyDto): Promise<TResult<true>> {
-        const [user, node, inbound, host, speedLimit, nodeInbound, nodeHost] = await Promise.all([
+        const [user, node, inbound, host, speedLimit, nodeInbound] = await Promise.all([
             this.prisma.users.findUnique({
                 where: { id: BigInt(dto.userId) },
                 select: { id: true },
@@ -402,11 +403,16 @@ export class UserRoutesService implements OnApplicationBootstrap {
             this.prisma.nodes.findUnique({ where: { uuid: dto.nodeUuid }, select: { uuid: true } }),
             this.prisma.configProfileInbounds.findUnique({
                 where: { uuid: dto.configProfileInboundUuid },
-                select: { uuid: true, port: true, rawInbound: true },
+                select: { uuid: true, profileUuid: true, port: true, rawInbound: true },
             }),
             this.prisma.hosts.findUnique({
                 where: { uuid: dto.hostUuid },
-                select: { uuid: true, configProfileInboundUuid: true },
+                select: {
+                    uuid: true,
+                    configProfileUuid: true,
+                    configProfileInboundUuid: true,
+                    nodes: { select: { nodeUuid: true } },
+                },
             }),
             dto.speedLimitUuid
                 ? this.prisma.speedLimits.findUnique({
@@ -423,21 +429,22 @@ export class UserRoutesService implements OnApplicationBootstrap {
                 },
                 select: { configProfileInboundUuid: true },
             }),
-            this.prisma.hostsToNodes.findUnique({
-                where: {
-                    hostUuid_nodeUuid: {
-                        nodeUuid: dto.nodeUuid,
-                        hostUuid: dto.hostUuid,
-                    },
-                },
-                select: { hostUuid: true },
-            }),
         ]);
 
-        if (!user || !node || !inbound || !host || !nodeInbound || !nodeHost) {
+        if (!user || !node || !inbound || !host || !nodeInbound) {
             return fail(ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND);
         }
-        if (host.configProfileInboundUuid !== inbound.uuid) {
+        if (
+            !isHostCompatibleWithUserRoute(
+                {
+                    configProfileUuid: host.configProfileUuid,
+                    configProfileInboundUuid: host.configProfileInboundUuid,
+                    nodeUuids: host.nodes.map(({ nodeUuid }) => nodeUuid),
+                },
+                dto.nodeUuid,
+                inbound,
+            )
+        ) {
             return fail(ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND);
         }
         if (dto.speedLimitUuid && !speedLimit) {
