@@ -62,7 +62,7 @@ export async function reconcileGostForwards(
                     : {}),
             })),
         },
-        connectionOpts,
+        { ...connectionOpts, nodeUuid },
     );
 
     if (!result.isOk) return result;

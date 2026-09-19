@@ -59,6 +59,46 @@ const ZSTD_HEADERS: RawAxiosRequestHeaders = { 'Content-Encoding': 'zstd' };
 
 const zstdCompressAsync = promisify(zstdCompress);
 
+type NodeTransportInitializationStatus = 'uninitialized' | 'initializing' | 'ready' | 'failed';
+
+interface NodeTransport {
+    httpsAgent: https.Agent;
+    mtlsOptions: IMtlsOptions;
+    servername: string;
+    authorization: string;
+    socksAgentCache: Map<string, MtlsSocksProxyAgent>;
+}
+
+class NodeTransportInitializationError extends Error {
+    readonly code = 'NODE_TRANSPORT_INIT_FAILED';
+
+    constructor() {
+        super('Node mTLS transport initialization failed');
+    }
+}
+
+const SAFE_REQUEST_ERROR_CODES = new Set([
+    'SELF_SIGNED_CERT_IN_CHAIN',
+    'DEPTH_ZERO_SELF_SIGNED_CERT',
+    'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+    'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+    'CERT_HAS_EXPIRED',
+    'CERT_NOT_YET_VALID',
+    'ERR_TLS_CERT_ALTNAME_INVALID',
+    'ERR_TLS_CERT_SIGNATURE_ALGORITHM_UNSUPPORTED',
+    'ERR_SSL_TLSV13_ALERT_CERTIFICATE_REQUIRED',
+    'ERR_SSL_SSLV3_ALERT_BAD_CERTIFICATE',
+    'ERR_BAD_REQUEST',
+    'ERR_BAD_RESPONSE',
+    'ERR_NETWORK',
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'ECONNABORTED',
+    'ETIMEDOUT',
+    'ENOTFOUND',
+    'EAI_AGAIN',
+]);
+
 type TStartCoreRequest = Omit<StartXrayCommand.Request, 'internals'> & {
     coreType?: TConfigProfileCoreType;
     internals: StartXrayCommand.Request['internals'] & {
@@ -84,10 +124,9 @@ const ZSTD_OPTIONS: ZstdOptions = {
 export class AxiosService {
     private readonly logger = new Logger(AxiosService.name);
 
-    public axiosInstance: AxiosInstance;
-    private mtlsOptions: IMtlsOptions;
-    private servername: string;
-    private readonly socksAgentCache = new Map<string, MtlsSocksProxyAgent>();
+    private readonly axiosInstance: AxiosInstance;
+    private initializationPromise: Promise<NodeTransport> | undefined;
+    private initializationStatus: NodeTransportInitializationStatus = 'uninitialized';
 
     constructor(private readonly commandBus: CommandBus) {
         this.axiosInstance = axios.create({
@@ -99,57 +138,98 @@ export class AxiosService {
         });
     }
 
-    public async setJwt() {
-        try {
-            const result = await this.commandBus.execute(new GetNodeJwtCommand());
-
-            if (!result.isOk) {
-                throw new Error(
-                    'There are a problem with the JWT token. Please restart Remnawave.',
-                );
-            }
-
-            const jwt = result.response;
-
-            this.axiosInstance.defaults.headers.common['Authorization'] = `Bearer ${jwt.jwtToken}`;
-
-            this.servername = deriveSni(jwt.caCert, jwt.jwtPublicKey);
-
-            this.mtlsOptions = {
-                cert: jwt.clientCert,
-                key: jwt.clientKey,
-                ca: jwt.caCert,
-            };
-
-            const httpsAgent = new https.Agent({
-                ...this.mtlsOptions,
-                checkServerIdentity: () => undefined,
-                rejectUnauthorized: true,
-                keepAlive: true,
-                minVersion: 'TLSv1.3',
-                servername: this.servername,
-            });
-
-            this.axiosInstance.defaults.httpsAgent = httpsAgent;
-
-            this.logger.log('Interceptor registered');
-            this.logger.log(`Node SNI: ${this.servername}`);
-        } catch (error) {
-            this.logger.error(`Error in onApplicationBootstrap: ${error}`);
-            throw error;
+    /**
+     * Each process owns its transport, but every Node request uses this same guard.
+     * Initialize lazily: global module hooks can run before CQRS handlers register.
+     */
+    public ensureNodeTransportInitialized(): Promise<NodeTransport> {
+        if (!this.initializationPromise) {
+            this.initializationStatus = 'initializing';
+            this.initializationPromise = this.initializeNodeTransport()
+                .then((transport) => {
+                    this.initializationStatus = 'ready';
+                    return transport;
+                })
+                .catch(() => {
+                    this.initializationStatus = 'failed';
+                    // Fail this request; a later request may retry a transient failure.
+                    this.initializationPromise = undefined;
+                    // Never expose credential-provider errors (which may contain key material).
+                    throw new NodeTransportInitializationError();
+                });
         }
+
+        return this.initializationPromise;
     }
 
-    private resolveAgent(proxyUrl: null | string): https.Agent {
-        if (!proxyUrl) {
-            return this.axiosInstance.defaults.httpsAgent as https.Agent;
+    /** Preserve explicit credential refresh; concurrent refreshes share one initialization. */
+    public setJwt(): Promise<NodeTransport> {
+        if (this.initializationStatus !== 'initializing') {
+            this.initializationPromise = undefined;
+        }
+        return this.ensureNodeTransportInitialized();
+    }
+
+    public getNodeTransportInitializationStatus(): NodeTransportInitializationStatus {
+        return this.initializationStatus;
+    }
+
+    private async initializeNodeTransport(): Promise<NodeTransport> {
+        const result = await this.commandBus.execute(new GetNodeJwtCommand());
+        if (!result.isOk) throw new NodeTransportInitializationError();
+
+        const jwt = result.response;
+        if (
+            !jwt ||
+            [jwt.jwtToken, jwt.clientCert, jwt.clientKey, jwt.caCert, jwt.jwtPublicKey].some(
+                (value) => typeof value !== 'string' || !value.trim(),
+            )
+        ) {
+            throw new NodeTransportInitializationError();
         }
 
-        const cached = this.socksAgentCache.get(proxyUrl);
+        const servername = deriveSni(jwt.caCert, jwt.jwtPublicKey);
+        const mtlsOptions: IMtlsOptions = {
+            cert: jwt.clientCert,
+            key: jwt.clientKey,
+            ca: jwt.caCert,
+        };
+        const httpsAgent = new https.Agent({
+            ...mtlsOptions,
+            checkServerIdentity: () => undefined,
+            rejectUnauthorized: true,
+            keepAlive: true,
+            minVersion: 'TLSv1.3',
+            servername,
+        });
+
+        // Publish a complete credential snapshot atomically. Requests already in flight
+        // retain their own snapshot; a refresh cannot mix an old Agent with a new JWT.
+        const transport: NodeTransport = {
+            httpsAgent,
+            mtlsOptions,
+            servername,
+            authorization: `Bearer ${jwt.jwtToken}`,
+            socksAgentCache: new Map(),
+        };
+        this.logger.log('Node mTLS transport initialized');
+        return transport;
+    }
+
+    private resolveAgent(proxyUrl: null | string, transport: NodeTransport): https.Agent {
+        if (!proxyUrl) {
+            return transport.httpsAgent;
+        }
+
+        const cached = transport.socksAgentCache.get(proxyUrl);
         if (cached) return cached;
 
-        const httpsAgent = new MtlsSocksProxyAgent(proxyUrl, this.mtlsOptions, this.servername);
-        this.socksAgentCache.set(proxyUrl, httpsAgent);
+        const httpsAgent = new MtlsSocksProxyAgent(
+            proxyUrl,
+            transport.mtlsOptions,
+            transport.servername,
+        );
+        transport.socksAgentCache.set(proxyUrl, httpsAgent);
 
         return httpsAgent;
     }
@@ -204,11 +284,12 @@ export class AxiosService {
         } = params;
 
         const url = this.getNodeUrl(opts.address, path, opts.port);
-        const httpsAgent = this.resolveAgent(opts.proxyUrl);
 
         try {
+            const transport = await this.ensureNodeTransportInitialized();
+            const httpsAgent = this.resolveAgent(opts.proxyUrl, transport);
             let body: unknown = EMPTY_BODY;
-            let headers: RawAxiosRequestHeaders | undefined;
+            let headers: RawAxiosRequestHeaders = { Authorization: transport.authorization };
 
             if (method === 'post') {
                 body = data ?? EMPTY_BODY;
@@ -222,7 +303,7 @@ export class AxiosService {
                     );
 
                     body = compressedData;
-                    headers = ZSTD_HEADERS;
+                    headers = { ...headers, ...ZSTD_HEADERS };
                 }
             }
 
@@ -235,15 +316,36 @@ export class AxiosService {
 
             return ok(response.data.response);
         } catch (error) {
-            if (internalError) {
-                return this.failWithInternalError(label, error);
+            if (
+                logAxiosError ||
+                internalError ||
+                path === GOST_NODE_API.syncForwards ||
+                error instanceof NodeTransportInitializationError
+            ) {
+                const errorCode =
+                    error instanceof NodeTransportInitializationError
+                        ? error.code
+                        : error instanceof AxiosError &&
+                            error.code &&
+                            SAFE_REQUEST_ERROR_CODES.has(error.code)
+                          ? error.code
+                          : 'NODE_REQUEST_FAILED';
+                this.logger.error({
+                    message: 'Node request failed',
+                    nodeUuid: opts.nodeUuid ?? null,
+                    requestPath: path,
+                    errorCode,
+                    tlsInitializationStatus: this.initializationStatus,
+                });
+            }
+
+            if (internalError) return fail(ERRORS.INTERNAL_SERVER_ERROR);
+
+            if (error instanceof NodeTransportInitializationError) {
+                return fail(ERRORS.NODE_ERROR_WITH_MSG.withMessage(error.message));
             }
 
             if (error instanceof AxiosError) {
-                if (logAxiosError) {
-                    this.logger.error(`Error in Axios ${label} request: ${error.message}`);
-                }
-
                 if (handle500 && error.response?.status === 500) {
                     return fail(
                         ERRORS.NODE_ERROR_500_WITH_MSG.withMessage(this.extractNodeError(error)),
@@ -253,11 +355,7 @@ export class AxiosService {
                 return fail(ERRORS.NODE_ERROR_WITH_MSG.withMessage(JSON.stringify(error.message)));
             }
 
-            this.logger.error(`Error in ${label}: ${error}`);
-
-            return fail(
-                ERRORS.NODE_ERROR_WITH_MSG.withMessage(JSON.stringify(error) ?? 'Unknown error'),
-            );
+            return fail(ERRORS.NODE_ERROR_WITH_MSG.withMessage('Node request failed'));
         }
     }
 
@@ -573,16 +671,6 @@ export class AxiosService {
             opts,
             timeout: 10_000,
         });
-    }
-
-    private failWithInternalError<T>(label: string, error: unknown): TResult<T> {
-        if (error instanceof AxiosError) {
-            this.logger.error(`Error in ${label}: ${error.response?.data}`);
-        } else {
-            this.logger.error(`Error in ${label}: ${error}`);
-        }
-
-        return fail(ERRORS.INTERNAL_SERVER_ERROR);
     }
 
     private async compressData(data: unknown): Promise<{

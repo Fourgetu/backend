@@ -5,6 +5,7 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 
 import { AxiosService } from '@common/axios';
+import { GOST_NODE_API } from '@common/axios/gost-forward.contract';
 import { PrismaService } from '@common/database/prisma.service';
 import { fail, ok, TResult } from '@common/types';
 import { ERRORS, EVENTS } from '@libs/contracts/constants';
@@ -15,8 +16,8 @@ import { NodesRepository } from '@modules/nodes/repositories/nodes.repository';
 
 import { CreateUserRouteBodyDto, GetUserRoutesQueryDto, UpdateUserRouteBodyDto } from './dtos';
 import { UserRouteEntity } from './entities';
-import { UserRoutesRepository } from './repositories';
 import { PortRangeAllocator } from './port-range-allocator.service';
+import { UserRoutesRepository } from './repositories';
 import { isHostCompatibleWithUserRoute } from './user-route-host-compatibility';
 
 const DEFAULT_PORT_START = 32000;
@@ -118,6 +119,7 @@ export class UserRoutesService implements OnApplicationBootstrap {
         }
 
         const health = await this.axiosService.getGostHealth({
+            nodeUuid,
             address: node.address,
             port: node.port,
             proxyUrl: node.proxyUrl,
@@ -138,7 +140,15 @@ export class UserRoutesService implements OnApplicationBootstrap {
 
             const reserved = await this.repository.listPorts(dto.nodeUuid, dto.network);
             if (reserved.includes(externalPort)) return fail(ERRORS.USER_ROUTE_PORT_ALREADY_EXISTS);
-            if ((await this.portRangeAllocator.detectConflict(dto.nodeUuid, externalPort, externalPort)).length > 0) {
+            if (
+                (
+                    await this.portRangeAllocator.detectConflict(
+                        dto.nodeUuid,
+                        externalPort,
+                        externalPort,
+                    )
+                ).length > 0
+            ) {
                 return fail(ERRORS.USER_ROUTE_PORT_ALREADY_EXISTS);
             }
 
@@ -167,17 +177,14 @@ export class UserRoutesService implements OnApplicationBootstrap {
                 }
             } catch (error) {
                 await this.repository.delete(route.uuid).catch(() => void 0);
-                return fail(
-                    {
-                        code: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
-                        message: `Unable to allocate a Hysteria2 hopping range: ${String(error)}`,
-                        httpCode: 400,
-                    },
-                );
+                return fail({
+                    code: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
+                    message: `Unable to allocate a Hysteria2 hopping range: ${String(error)}`,
+                    httpCode: 400,
+                });
             }
 
-            const allocatedRoute =
-                (await this.repository.findByUuid(route.uuid)) ?? route;
+            const allocatedRoute = (await this.repository.findByUuid(route.uuid)) ?? route;
 
             const runtime = await this.syncNode(dto.nodeUuid);
             if (!runtime.isOk || !runtime.response.applied) {
@@ -248,7 +255,8 @@ export class UserRoutesService implements OnApplicationBootstrap {
                 if (!inbound || inbound.port === null || dto.internalPort !== inbound.port) {
                     return fail({
                         code: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
-                        message: 'GOST internal port must match the selected proxy-core inbound port',
+                        message:
+                            'GOST internal port must match the selected proxy-core inbound port',
                         httpCode: 400,
                     });
                 }
@@ -310,21 +318,16 @@ export class UserRoutesService implements OnApplicationBootstrap {
                 if (dto.portHoppingConfigUuid !== undefined) {
                     await this.portRangeAllocator.release(dto.uuid);
                     if (dto.portHoppingConfigUuid !== null) {
-                        await this.portRangeAllocator.allocate(
-                            dto.uuid,
-                            dto.portHoppingConfigUuid,
-                        );
+                        await this.portRangeAllocator.allocate(dto.uuid, dto.portHoppingConfigUuid);
                     }
                 }
             } catch (error) {
                 await this.restoreRoute(existing);
-                return fail(
-                    {
-                        code: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
-                        message: `Unable to update the Hysteria2 hopping allocation: ${String(error)}`,
-                        httpCode: 400,
-                    },
-                );
+                return fail({
+                    code: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
+                    message: `Unable to update the Hysteria2 hopping allocation: ${String(error)}`,
+                    httpCode: 400,
+                });
             }
 
             const result = await this.repository.findByUuid(dto.uuid);
@@ -518,7 +521,11 @@ export class UserRoutesService implements OnApplicationBootstrap {
             where: { uuid: configUuid },
             include: {
                 configProfileInbound: {
-                    select: { uuid: true, rawInbound: true, profile: { select: { coreType: true } } },
+                    select: {
+                        uuid: true,
+                        rawInbound: true,
+                        profile: { select: { coreType: true } },
+                    },
                 },
             },
         });
@@ -530,14 +537,12 @@ export class UserRoutesService implements OnApplicationBootstrap {
             config.configProfileInbound.profile.coreType !== 'singbox' ||
             rawInbound?.type !== 'hysteria2'
         ) {
-            return fail(
-                {
-                    code: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
-                    message:
-                        'Port hopping requires an enabled config for the selected sing-box Hysteria2 inbound',
-                    httpCode: 400,
-                },
-            );
+            return fail({
+                code: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
+                message:
+                    'Port hopping requires an enabled config for the selected sing-box Hysteria2 inbound',
+                httpCode: 400,
+            });
         }
         return ok(true);
     }
@@ -625,11 +630,20 @@ export class UserRoutesService implements OnApplicationBootstrap {
                         : {}),
                 })),
             },
-            { address: node.address, port: node.port, proxyUrl: node.proxyUrl },
+            { nodeUuid, address: node.address, port: node.port, proxyUrl: node.proxyUrl },
         );
 
-        if (!runtime.isOk) return runtime;
+        if (!runtime.isOk || !runtime.response.applied) {
+            this.logger.error({
+                message: 'User route GOST synchronization failed',
+                nodeUuid,
+                requestPath: GOST_NODE_API.syncForwards,
+                errorCode: ERRORS.USER_ROUTE_RUNTIME_SYNC_FAILED.code,
+                tlsInitializationStatus: this.axiosService.getNodeTransportInitializationStatus(),
+            });
+        }
 
+        if (!runtime.isOk) return runtime;
         if (!runtime.response.applied) {
             return fail(
                 ERRORS.USER_ROUTE_RUNTIME_SYNC_FAILED.withMessage(

@@ -12,6 +12,7 @@ export interface INodeRequestOpts {
 }
 
 export interface INodeConnectionOpts {
+    nodeUuid?: string;
     address: string;
     port: number | null;
     proxyUrl: string | null;

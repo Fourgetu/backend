@@ -220,7 +220,7 @@ export class SpeedLimitsService {
                     };
                 }),
             },
-            { address: node.address, port: node.port, proxyUrl: node.proxyUrl },
+            { nodeUuid, address: node.address, port: node.port, proxyUrl: node.proxyUrl },
         );
 
         if (!runtime.isOk) return runtime;

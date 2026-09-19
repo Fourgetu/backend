@@ -75,7 +75,7 @@ async function bootstrap(): Promise<void> {
     await app.init();
 
     const axiosService = app.get(AxiosService);
-    await axiosService.setJwt();
+    await axiosService.ensureNodeTransportInitialized();
 
     if (import.meta.webpackHot) {
         import.meta.webpackHot.accept();
