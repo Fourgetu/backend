@@ -11,7 +11,7 @@ export namespace GetTlsCertificateCommand {
         SYSTEM_ROUTES.TLS_CERTIFICATE,
         'get',
         'Get Panel TLS Certificate Metadata',
-        { scope: 'configuration', kind: 'read' },
+        { scope: 'tls-certificate', kind: 'read' },
         'Returns public metadata for the panel-managed TLS certificate. Private material is never returned.',
     );
 
