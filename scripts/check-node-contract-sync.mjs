@@ -41,7 +41,7 @@ const hashDirectory = async (directory) => {
     for (const relative of files) {
         hash.update(relative.replaceAll(path.sep, '/'));
         hash.update('\0');
-        hash.update((await readFile(path.join(directory, relative), 'utf8')).replaceAll('\\r\\n', '\\n'));
+        hash.update((await readFile(path.join(directory, relative), 'utf8')).replaceAll('\r\n', '\n'));
         hash.update('\0');
     }
 
