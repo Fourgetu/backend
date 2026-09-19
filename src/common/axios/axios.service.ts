@@ -59,8 +59,16 @@ const ZSTD_HEADERS: RawAxiosRequestHeaders = { 'Content-Encoding': 'zstd' };
 
 const zstdCompressAsync = promisify(zstdCompress);
 
-type TStartCoreRequest = StartXrayCommand.Request & {
+type TStartCoreRequest = Omit<StartXrayCommand.Request, 'internals'> & {
     coreType?: TConfigProfileCoreType;
+    internals: StartXrayCommand.Request['internals'] & {
+        certificates?: Array<{
+            id: string;
+            hash: string;
+            certificate: string;
+            privateKey: string;
+        }>;
+    };
 };
 
 const ZSTD_OPTIONS: ZstdOptions = {

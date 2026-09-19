@@ -9,6 +9,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StartXrayCommand } from '@remnawave/node-contract';
 
 import { AxiosService } from '@common/axios/axios.service';
+import { CertificateProfileService } from '@common/certificates/certificate-profile.service';
 import { PrismaService } from '@common/database/prisma.service';
 import { reconcileGostForwards } from '@common/gost-runtime/reconcile-gost-forwards';
 import { RawCacheService } from '@common/raw-cache';
@@ -44,6 +45,7 @@ export class StartNodeProcessor extends WorkerHost {
         private readonly commandBus: CommandBus,
         private readonly rawCacheService: RawCacheService,
         private readonly prisma: PrismaService,
+        private readonly certificateProfileService: CertificateProfileService,
     ) {
         super();
     }
@@ -291,6 +293,13 @@ export class StartNodeProcessor extends WorkerHost {
                     continue;
                 }
 
+                const certificates =
+                    config.response.coreType === 'singbox'
+                        ? await this.certificateProfileService.getBundleForConfig(
+                              config.response.config as Record<string, unknown>,
+                          )
+                        : [];
+
                 const reqStartTime = getTime();
                 const startResult = await this.axios.startXray(
                     {
@@ -307,6 +316,7 @@ export class StartNodeProcessor extends WorkerHost {
                                 tags: node.tags,
                             },
                             integrations: nodeIntegrations,
+                            ...(certificates.length > 0 ? { certificates } : {}),
                         },
                     },
                     {

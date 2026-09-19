@@ -12,6 +12,7 @@ import { readPackageJSON } from 'pkg-types';
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { QueryBus } from '@nestjs/cqrs';
 
+import { CertificateProfileService } from '@common/certificates/certificate-profile.service';
 import { TypedConfigService } from '@common/config/app-config';
 import { RawCacheService } from '@common/raw-cache';
 import { RuntimeMetric } from '@common/runtime-metrics/interfaces';
@@ -77,7 +78,12 @@ export class SystemService implements OnApplicationBootstrap {
         private readonly srrParser: ResponseRulesParserService,
         private readonly srrMatcher: ResponseRulesMatcherService,
         private readonly rawCacheService: RawCacheService,
+        private readonly certificateProfileService: CertificateProfileService,
     ) {}
+
+    public async getTlsCertificate() {
+        return this.certificateProfileService.getPublicMetadata();
+    }
 
     public async onApplicationBootstrap(): Promise<void> {
         const { version } = await readPackageJSON();

@@ -34,6 +34,7 @@ import {
     GetHttpStatsCommand,
     TestSrrMatcherCommand,
     GetConfigurationCommand,
+    GetTlsCertificateCommand,
 } from '@libs/contracts/commands';
 import { ROLE } from '@libs/contracts/constants';
 
@@ -53,6 +54,7 @@ import {
     GetStatsDigestQueryDto,
     GetStatsDigestResponseDto,
     GetConfigurationResponseDto,
+    GetTlsCertificateResponseDto,
 } from './dtos';
 import { RouteCounterService } from './route-counter.service';
 import { SystemService } from './system.service';
@@ -95,6 +97,17 @@ export class SystemController {
         const data = errorHandler(result);
         return {
             response: data,
+        };
+    }
+
+    @Endpoint({
+        command: GetTlsCertificateCommand,
+        httpCode: HttpStatus.OK,
+        type: GetTlsCertificateResponseDto,
+    })
+    async getTlsCertificate(): Promise<GetTlsCertificateResponseDto> {
+        return {
+            response: await this.systemService.getTlsCertificate(),
         };
     }
 

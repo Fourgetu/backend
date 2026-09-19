@@ -59,6 +59,12 @@ export const configSchema = z
 
         FRONT_END_DOMAIN: z.string(),
         PANEL_DOMAIN: z.string().optional(),
+        PANEL_CERTIFICATE_PATH: z
+            .string()
+            .default('/var/lib/remnawave/panel-certificate/fullchain.pem'),
+        PANEL_PRIVATE_KEY_PATH: z
+            .string()
+            .default('/var/lib/remnawave/panel-certificate/privkey.pem'),
         METRICS_USER: z.string().min(1),
         METRICS_PASS: z.string().min(1),
         SUB_PUBLIC_DOMAIN: z.string(),

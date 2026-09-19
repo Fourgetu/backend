@@ -7,6 +7,7 @@ import { Logger, Module, type OnApplicationShutdown } from '@nestjs/common';
 import { ConditionalModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 
+import { CertificateProfileModule } from '@common/certificates/certificate-profile.module';
 import { CommonConfigModule } from '@common/config/common-config/common-config.module';
 import { PrismaModule } from '@common/database';
 import { PrismaService } from '@common/database/prisma.service';
@@ -27,6 +28,7 @@ const HASHED = /-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/i;
     imports: [
         RawCacheModule,
         CommonConfigModule,
+        CertificateProfileModule,
         PrismaModule,
         ClsModule.forRoot({
             plugins: [

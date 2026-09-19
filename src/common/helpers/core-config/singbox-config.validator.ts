@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 
 import { HashedSet } from '@remnawave/hashed-set';
 
+import { hasPartialPanelCertificatePair } from '@common/certificates/managed-certificate.constants';
+
 import { UserForConfigEntity } from '@modules/users/entities/users-for-config';
 
 import { getSsPassword, isSS2022MethodFromMethod } from '../xray-config/ss-cipher';
@@ -87,6 +89,14 @@ export class SingBoxConfig implements ICoreConfig {
         for (const inbound of this.config.inbounds) {
             if (!inbound.tls) continue;
             if (inbound.tls.certificate_path) {
+                if (
+                    hasPartialPanelCertificatePair(
+                        inbound.tls.certificate_path,
+                        inbound.tls.key_path,
+                    )
+                ) {
+                    continue;
+                }
                 try {
                     inbound.tls.certificate = this.readPemLines(inbound.tls.certificate_path);
                     delete inbound.tls.certificate_path;
