@@ -121,6 +121,7 @@
     "zod": "4.5.4"
   },
   "devDependencies": {
+    "@nestjs/testing": "^11.2.1",
     "@rspack/cli": "^2.1.10",
     "@rspack/core": "^2.1.10",
     "@rspack/dev-server": "^2.2.0",

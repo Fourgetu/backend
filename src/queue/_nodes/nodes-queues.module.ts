@@ -1,6 +1,7 @@
 import { CqrsModule } from '@nestjs/cqrs';
 
 import { AxiosModule } from '@common/axios';
+import { CertificateProfileModule } from '@common/certificates/certificate-profile.module';
 
 import { QUEUES_NAMES } from '@queue/queue.enum';
 import { createDomainQueueModule } from '@queue/queue.factory';
@@ -40,5 +41,5 @@ const queues = [
 export const NodesQueuesModule = createDomainQueueModule({
     queues,
     service: NodesQueuesService,
-    imports: [AxiosModule, CqrsModule],
+    imports: [AxiosModule, CertificateProfileModule, CqrsModule],
 });
