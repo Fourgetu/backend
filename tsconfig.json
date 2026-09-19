@@ -16,6 +16,7 @@
     "outDir": "./dist",
     "baseUrl": "./",
     "paths": {
+      "@remnawave/node-contract": ["./libs/node-contract/index.ts"],
       "@common/*": ["./src/common/*"],
       "@integration-modules/*": ["./src/integration-modules/*"],
       "@modules/*": ["./src/modules/*"],

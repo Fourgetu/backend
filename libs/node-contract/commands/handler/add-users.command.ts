@@ -1,0 +1,77 @@
+import { z } from 'zod';
+
+import { REST_API } from '../../api';
+
+export namespace AddUsersCommand {
+    export const url = REST_API.HANDLER.ADD_USERS;
+
+    const BaseTrojanUser = z.object({
+        type: z.literal('trojan'),
+        tag: z.string(),
+    });
+
+    const BaseVlessUser = z.object({
+        type: z.literal('vless'),
+        tag: z.string(),
+        flow: z.enum(['xtls-rprx-vision', '']),
+    });
+
+    const BaseShadowsocksUser = z.object({
+        type: z.literal('shadowsocks'),
+        tag: z.string(),
+    });
+
+    const BaseShadowsocks22User = z.object({
+        type: z.literal('shadowsocks22'),
+        tag: z.string(),
+    });
+
+    const BaseHysteriaUser = z.object({
+        type: z.literal('hysteria'),
+        tag: z.string(),
+    });
+
+    const BasePasswordUser = z.object({
+        type: z.enum(['anytls', 'hysteria2', 'socks']),
+        tag: z.string(),
+    });
+
+    export const RequestSchema = z.object({
+        affectedInboundTags: z.array(z.string()),
+        users: z.array(
+            z.object({
+                inboundData: z.array(
+                    z.discriminatedUnion('type', [
+                        BaseTrojanUser,
+                        BaseVlessUser,
+                        BaseShadowsocksUser,
+                        BaseShadowsocks22User,
+                        BaseHysteriaUser,
+                        BasePasswordUser,
+                    ]),
+                ),
+
+                userData: z.object({
+                    userId: z.string(),
+                    hashUuid: z.uuid(),
+                    vlessUuid: z.uuid(),
+                    trojanPassword: z.string(),
+                    ssPassword: z.string(),
+                    socksUsername: z.string(),
+                    socksPassword: z.string(),
+                }),
+            }),
+        ),
+    });
+
+    export type Request = z.infer<typeof RequestSchema>;
+
+    export const ResponseSchema = z.object({
+        response: z.object({
+            success: z.boolean(),
+            error: z.string().nullable(),
+        }),
+    });
+
+    export type Response = z.infer<typeof ResponseSchema>;
+}

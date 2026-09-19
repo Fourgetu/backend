@@ -1,80 +1,34 @@
-name: Deploy backend contracts
+name: Verify vendored Node Contract
+
 on:
   push:
-    branches: ['**']
     paths:
-      - 'libs/contract/package.json'
+      - 'NODE_CONTRACT_SOURCE.json'
+      - 'libs/node-contract/**'
+      - 'scripts/check-node-contract-sync.mjs'
+      - 'tests/unit/node-contract.test.ts'
       - '.github/workflows/deploy-lib.yml'
+  workflow_dispatch:
+
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
-
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: '24.x'
-          registry-url: 'https://registry.npmjs.org'
+          cache: npm
 
-      - name: Update npm
-        run: npm install -g npm@11
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Install dependencies and build
-        working-directory: 'libs/contract'
-        run: npm i && npm run prepublish
-
-      - name: Publish package on NPM
-        working-directory: 'libs/contract'
-        run: npm publish
-
-      # - name: Install HashedSet dependencies and build
-      #   working-directory: 'libs/hashed-set'
-      #   run: npm i && npm run prepublish
-
-      # - name: Publish HashedSet package on NPM
-      #   working-directory: 'libs/hashed-set'
-      #   run: npm publish --provenance --access public
-      #   env:
-      #     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-  send-telegram-message:
-    name: Send Telegram message
-    needs: [build]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@v2
-
-      - name: Send Telegram message
-        uses: proDreams/actions-telegram-notifier@main
-        with:
-          token: ${{ secrets.TELEGRAM_TOKEN }}
-          chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
-          thread_id: ${{ secrets.TELEGRAM_TOPIC_ID }}
-          status: success
-          notify_fields: 'repository,branch,commit,workflow'
-          title: 'Deploy contract finished.'
-
-  notify-on-error:
-    runs-on: ubuntu-latest
-    needs: [build]
-    if: failure()
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@v2
-
-      - name: Send Telegram message
-        uses: proDreams/actions-telegram-notifier@main
-        with:
-          token: ${{ secrets.TELEGRAM_TOKEN }}
-          chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
-          thread_id: ${{ secrets.TELEGRAM_TOPIC_ID }}
-          status: failure
-          notify_fields: 'repository,branch,commit,workflow'
-          title: 'Deploy contract failed.'
+      - name: Verify contract sync
+        run: |
+          npm run contract:check
+          npm run test:unit

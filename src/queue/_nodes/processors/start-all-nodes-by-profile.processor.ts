@@ -7,6 +7,7 @@ import { Logger, Scope } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 
 import { AxiosService } from '@common/axios/axios.service';
+import { CertificateProfileService } from '@common/certificates/certificate-profile.service';
 import { RawCacheService } from '@common/raw-cache';
 import {
     CACHE_KEYS,
@@ -46,6 +47,7 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
 
     constructor(
         private readonly axios: AxiosService,
+        private readonly certificateProfileService: CertificateProfileService,
         private readonly nodesQueuesService: NodesQueuesService,
         private readonly queryBus: QueryBus,
         private readonly commandBus: CommandBus,
@@ -352,6 +354,12 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
                 const coreConfig = config.response.config as {
                     inbounds?: Record<string, unknown>[];
                 };
+                const certificates =
+                    config.response.coreType === CONFIG_PROFILE_CORE_TYPE.SINGBOX
+                        ? await this.certificateProfileService.getBundleForConfig(
+                              config.response.config as Record<string, unknown>,
+                          )
+                        : [];
 
                 const startXrayResponse = await this.axios.startXray(
                     {
@@ -378,6 +386,7 @@ export class StartAllNodesByProfileQueueProcessor extends WorkerHost {
                                 tags: node.tags,
                             },
                             integrations: nodeIntegrations,
+                            ...(certificates.length > 0 ? { certificates } : {}),
                         },
                     },
                     {

@@ -22,6 +22,8 @@ WORKDIR /opt/app
 COPY package*.json ./
 COPY patches ./patches
 COPY prisma ./prisma
+COPY NODE_CONTRACT_SOURCE.json ./
+COPY scripts ./scripts
 COPY rspack.config.mjs ./
 COPY prisma.config.ts ./prisma.config.ts
 COPY @types ./@types
@@ -31,6 +33,8 @@ RUN npm ci --prefer-offline --no-audit --no-fund
 COPY tsconfig*.json ./
 COPY src ./src
 COPY libs ./libs
+
+RUN npm run contract:check
 
 RUN npm run migrate:generate \
     && npm run generate:openapi \

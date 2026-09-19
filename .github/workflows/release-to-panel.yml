@@ -8,6 +8,7 @@ on:
 
 jobs:
   create-release:
+    if: github.repository_owner == 'remnawave'
     runs-on: ubuntu-latest
     steps:
       - id: frontend-tag
