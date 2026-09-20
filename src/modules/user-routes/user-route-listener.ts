@@ -18,8 +18,8 @@ export const isUserRouteListenerAllowed = ({
     }
     return (
         allowPublicInbound === true &&
-        coreType === 'xray' &&
-        listen === '0.0.0.0' &&
-        internalAddress === '127.0.0.1'
+        (coreType === 'xray' || coreType === 'singbox') &&
+        ((listen === '0.0.0.0' && internalAddress === '127.0.0.1') ||
+            (listen === '::' && internalAddress === '::1'))
     );
 };

@@ -23,11 +23,11 @@ export namespace CreateUserRouteCommand {
         speedLimitUuid: z.uuid().nullable().optional(),
         portHoppingConfigUuid: z.uuid().nullable().optional(),
         externalPort: port.optional(),
-        // Explicit acknowledgement that the original public Xray port can bypass GOST.
+        // Explicit acknowledgement that the original public core port can bypass GOST.
         allowPublicInbound: z.boolean().optional(),
         internalAddress: z.string().default('127.0.0.1'),
         internalPort: port,
-        network: z.enum(['tcp', 'udp']).default('tcp'),
+        network: z.enum(['tcp', 'udp', 'tcp,udp']).default('tcp'),
         enabled: z.boolean().default(true),
     });
     export const ResponseSchema = z.object({ response: UserRouteSchema });

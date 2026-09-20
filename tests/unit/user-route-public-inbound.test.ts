@@ -18,8 +18,11 @@ const body = {
     enabled: true,
 };
 
-function fixture(listen: unknown = '0.0.0.0', coreType = 'xray') {
-    const rawInbound = { listen, port: 34397, protocol: 'vless', tag: 'test-xray' };
+function fixture(listen: unknown = '0.0.0.0', coreType = 'xray', protocol = 'vless') {
+    const rawInbound =
+        coreType === 'singbox'
+            ? { listen, listen_port: 34397, type: protocol, tag: 'test-sb' }
+            : { listen, port: 34397, protocol, tag: 'test-xray' };
     const original = JSON.stringify(rawInbound);
     let stored: Record<string, unknown> | null = null;
     const requests: unknown[] = [];
@@ -46,6 +49,7 @@ function fixture(listen: unknown = '0.0.0.0', coreType = 'xray') {
         configProfileInboundsToNodes: { findUnique: async () => ({}) },
     };
     const repository = {
+        hasOverlappingRoute: async () => false,
         listPorts: async () => [],
         create: async (data: Record<string, unknown>) => {
             stored = { ...data, hopStartPort: null, hopEndPort: null };
@@ -98,6 +102,28 @@ test('create DTO preserves explicit opt-in; old clients remain strict by default
             .success,
         false,
     );
+});
+
+test('SS2022 TCP+UDP routes allocate one external port and sync both networks for either core', async () => {
+    for (const core of ['xray', 'singbox']) {
+        const f = fixture('127.0.0.1', core, 'shadowsocks');
+        const result = await f.service.create({ ...body, network: 'tcp,udp' });
+        assert.equal(result.isOk, true);
+        assert.equal(f.stored()?.network, 'tcp,udp');
+        const forwards = (
+            f.requests[0] as { forwards: { id: string; externalPort: number; network: string }[] }
+        ).forwards;
+        assert.deepEqual(
+            forwards.map((item) => item.network),
+            ['tcp', 'udp'],
+        );
+        assert.equal(forwards[0].id, forwards[1].id);
+        assert.equal(forwards[0].externalPort, forwards[1].externalPort);
+        f.assertUnchanged();
+    }
+    const f = fixture('127.0.0.1', 'singbox');
+    assert.equal((await f.service.create({ ...body, network: 'tcp,udp' })).isOk, false);
+    assert.equal(f.stored(), null);
 });
 
 test('Xray public listener requires explicit opt-in before insert or Node sync', async () => {
@@ -155,11 +181,34 @@ test('compatibility never accepts public targets, mismatched loopback or arbitra
     }
 });
 
-test('sing-box and unknown cores cannot opt into Xray public compatibility', async () => {
-    for (const coreType of ['singbox', 'unknown']) {
+test('unknown cores cannot opt into public compatibility', async () => {
+    for (const coreType of ['unknown']) {
         const f = fixture('0.0.0.0', coreType);
         assert.equal((await f.service.create({ ...body, allowPublicInbound: true })).isOk, false);
         assert.equal(f.stored(), null);
+    }
+});
+
+test('both cores accept only explicit wildcard opt-in with the matching loopback family', async () => {
+    for (const coreType of ['xray', 'singbox']) {
+        const f = fixture('0.0.0.0', coreType);
+        assert.equal((await f.service.create({ ...body, allowPublicInbound: true })).isOk, true);
+        f.assertUnchanged();
+        for (const [listen, internalAddress] of [
+            ['::', '::1'],
+            ['0.0.0.0', '127.0.0.1'],
+        ]) {
+            assert.equal(
+                isUserRouteListenerAllowed({
+                    listen,
+                    internalAddress,
+                    coreType,
+                    allowPublicInbound: true,
+                }),
+                true,
+            );
+            assert.equal(isUserRouteListenerAllowed({ listen, internalAddress, coreType }), false);
+        }
     }
 });
 

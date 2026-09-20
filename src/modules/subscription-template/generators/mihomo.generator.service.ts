@@ -195,7 +195,7 @@ export class MihomoGeneratorService {
             server: host.address,
             port: host.port,
             network: this.resolveClashNetwork(host),
-            udp: true,
+            udp: host.udpEnabled !== false,
             'ip-version': host.clientOverrides.mihomoIpVersion ?? undefined,
         };
 

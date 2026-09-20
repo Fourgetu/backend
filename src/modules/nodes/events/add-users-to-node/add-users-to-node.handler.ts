@@ -52,7 +52,13 @@ export class AddUsersToNodeHandler implements IEventHandler<AddUsersToNodeEvent>
             for (const node of activeNodes) {
                 const activeTags = new Set(node.activeInbounds.map((ib) => ib.tag));
 
-                if (node.activeInbounds.some((inbound) => inbound.type === 'socks')) {
+                // Batch contract has one raw SS password per user, not a per-inbound cipher.
+                // Reconcile both cores from the authoritative enabled-user snapshot.
+                if (
+                    node.activeInbounds.some(
+                        (inbound) => inbound.type === 'socks' || isSS2022Method(inbound.rawInbound),
+                    )
+                ) {
                     await this.nodesQueuesService.startNode({ nodeUuid: node.uuid });
                     continue;
                 }

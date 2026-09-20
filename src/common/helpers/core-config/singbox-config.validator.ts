@@ -7,8 +7,13 @@ import { hasPartialPanelCertificatePair } from '@common/certificates/managed-cer
 
 import { UserForConfigEntity } from '@modules/users/entities/users-for-config';
 
-import { getSsPassword, isSS2022MethodFromMethod } from '../xray-config/ss-cipher';
+import {
+    getSsPassword,
+    isSS2022MethodFromMethod,
+    validateManagedShadowsocks,
+} from '../xray-config/ss-cipher';
 import { ICoreConfig, ICoreConfigInbound } from './core-config.interface';
+import { singBoxVlessFlow } from './singbox-vless-flow';
 
 const MANAGED_CLIENT_PROTOCOLS = new Set([
     'anytls',
@@ -29,6 +34,7 @@ interface ISingBoxInbound extends TJsonRecord {
     transport?: { type?: string };
     tls?: {
         enabled?: boolean;
+        reality?: { enabled?: boolean };
         certificate?: string | string[];
         certificate_path?: string;
         key?: string | string[];
@@ -74,7 +80,11 @@ export class SingBoxConfig implements ICoreConfig {
                 rawInbound: inbound,
                 type: inbound.type,
                 network: this.getNetwork(inbound),
-                security: inbound.tls?.enabled ? 'tls' : null,
+                security: inbound.tls?.enabled
+                    ? inbound.tls.reality?.enabled
+                        ? 'reality'
+                        : 'tls'
+                    : null,
                 port: Number.isInteger(inbound.listen_port) ? inbound.listen_port! : null,
             }));
     }
@@ -168,7 +178,11 @@ export class SingBoxConfig implements ICoreConfig {
             case 'socks':
                 return { username: user.socksUsername, password: user.socksPassword };
             case 'vless':
-                return { name, uuid: user.vlessUuid };
+                return {
+                    name,
+                    uuid: user.vlessUuid,
+                    ...(singBoxVlessFlow(inbound) ? { flow: singBoxVlessFlow(inbound) } : {}),
+                };
             case 'trojan':
                 return { name, password: user.trojanPassword };
             case 'shadowsocks':
@@ -177,6 +191,7 @@ export class SingBoxConfig implements ICoreConfig {
                     password: getSsPassword(
                         user.ssPassword,
                         isSS2022MethodFromMethod(inbound.method),
+                        inbound.method,
                     ),
                 };
             default:
@@ -232,6 +247,14 @@ export class SingBoxConfig implements ICoreConfig {
                 throw new Error(`${inbound.type} inbound "${inbound.tag}" requires tls.enabled.`);
             }
             tags.add(inbound.tag);
+            if (inbound.type === 'shadowsocks') {
+                validateManagedShadowsocks(inbound.method, inbound.password);
+                if (!isSS2022MethodFromMethod(inbound.method)) {
+                    throw new Error(
+                        'sing-box Shadowsocks Managed Users requires SS2022 AES-128 or AES-256; traditional AEAD is single-user only.',
+                    );
+                }
+            }
         }
     }
 
@@ -246,6 +269,8 @@ export class SingBoxConfig implements ICoreConfig {
         if (Array.isArray(inbound.network)) return inbound.network.join(',');
         if (inbound.type === 'hysteria2') return 'udp';
         if (inbound.type === 'anytls' || inbound.type === 'socks') return 'tcp';
+        if (inbound.type === 'vless' || inbound.type === 'trojan') return 'tcp';
+        if (inbound.type === 'shadowsocks') return 'tcp,udp';
         return null;
     }
 

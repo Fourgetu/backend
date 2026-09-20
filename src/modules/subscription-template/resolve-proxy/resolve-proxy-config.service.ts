@@ -16,6 +16,7 @@ import { Injectable, Logger } from '@nestjs/common';
 
 import { TypedConfigService } from '@common/config/app-config';
 import { PrismaService } from '@common/database/prisma.service';
+import { singBoxVlessFlow } from '@common/helpers/core-config/singbox-vless-flow';
 import {
     resolveEncryptionFromDecryption,
     resolveInboundAndMlDsa65PublicKey,
@@ -31,6 +32,7 @@ import { ExternalSquadEntity } from '@modules/external-squads/entities';
 import { HostWithRawInbound } from '@modules/hosts/entities/host-with-inbound-tag.entity';
 import { ISRRContext } from '@modules/subscription-response-rules/interfaces';
 import { SubscriptionSettingsEntity } from '@modules/subscription-settings/entities/subscription-settings.entity';
+import { resolveUserRouteNetwork } from '@modules/user-routes/user-route-network';
 import { UserEntity } from '@modules/users/entities';
 
 import {
@@ -63,10 +65,15 @@ export interface IResolveProxyConfigOptions {
 
 interface SingBoxInboundConfig {
     type?: string;
+    tag?: string;
+    method?: string;
+    password?: string;
+    transport?: unknown;
     tls?: {
         enabled?: boolean;
         server_name?: string;
         alpn?: string | string[];
+        reality?: { enabled?: boolean; short_id?: string[] };
     };
     obfs?: {
         type?: string;
@@ -577,6 +584,33 @@ export class ResolveProxyConfigService {
             };
         }
 
+        if (singBoxType === 'vless') {
+            return {
+                protocol: 'vless',
+                protocolOptions: {
+                    id: setVlessRouteForUuid(user.vlessUuid, inputHost.vlessRouteId),
+                    encryption: 'none',
+                    flow: singBoxVlessFlow(inbound as unknown as SingBoxInboundConfig),
+                },
+            };
+        }
+        if (singBoxType === 'trojan') {
+            return { protocol: 'trojan', protocolOptions: { password: user.trojanPassword } };
+        }
+        if (singBoxType === 'shadowsocks') {
+            const sb = inbound as unknown as SingBoxInboundConfig;
+            return {
+                protocol: 'shadowsocks',
+                protocolOptions: {
+                    method: sb.method!,
+                    password: isSS2022MethodFromMethod(sb.method)
+                        ? `${sb.password}:${getSsPassword(user.ssPassword, true, sb.method)}`
+                        : user.ssPassword,
+                    uot: false,
+                    uotVersion: 1,
+                },
+            };
+        }
         if (!inbound.settings) {
             return null;
         }
@@ -604,7 +638,7 @@ export class ResolveProxyConfigService {
                 let clientPassword = user.ssPassword;
 
                 if (isSS2022MethodFromMethod(settings.method) && 'password' in settings) {
-                    clientPassword = `${settings.password}:${getSsPassword(user.ssPassword, true)}`;
+                    clientPassword = `${settings.password}:${getSsPassword(user.ssPassword, true, settings.method)}`;
                 }
 
                 return {
@@ -683,17 +717,32 @@ export class ResolveProxyConfigService {
                     vlessUuid: user.vlessUuid,
                 });
 
-        const security =
-            isSingBoxHysteria2 || isSingBoxAnyTls
-                ? this.resolveSingBoxTlsSecurity(singBoxInbound, inputHost, address)
-                : this.resolveSecurity(
-                      inbound.streamSettings,
-                      inputHost,
-                      inbound.tag!,
-                      ctx.publicKeyMap,
-                      ctx.mldsa65PublicKeyMap,
-                      address,
-                  );
+        const security: SecurityVariant = singBoxInbound.tls?.reality?.enabled
+            ? {
+                  security: 'reality',
+                  securityOptions: {
+                      publicKey: ctx.publicKeyMap.get(inbound.tag!) || '',
+                      shortId: singBoxInbound.tls.reality.short_id?.[0] || '',
+                      serverName: this.resolveFinalServerName(
+                          inputHost,
+                          singBoxInbound.tls.server_name,
+                          address,
+                      ),
+                      fingerprint: inputHost.fingerprint ?? 'chrome',
+                      spiderX: '',
+                      mldsa65Verify: null,
+                  },
+              }
+            : singBoxInbound.type
+              ? this.resolveSingBoxTlsSecurity(singBoxInbound, inputHost, address)
+              : this.resolveSecurity(
+                    inbound.streamSettings,
+                    inputHost,
+                    inbound.tag!,
+                    ctx.publicKeyMap,
+                    ctx.mldsa65PublicKeyMap,
+                    address,
+                );
 
         const runtimeFinalMask = isSingBoxHysteria2
             ? this.resolveSingBoxHysteriaFinalMask(singBoxInbound)
@@ -705,6 +754,9 @@ export class ResolveProxyConfigService {
 
         return {
             finalRemark: finalRemark,
+            udpEnabled:
+                protocol.protocol !== 'shadowsocks' ||
+                (ctx.userRoute?.network ?? resolveUserRouteNetwork(inbound)).includes('udp'),
             address: address,
             port: ctx.userRoute?.externalPort ?? inputHost.port,
             streamOverrides: {
@@ -837,12 +889,12 @@ export class ResolveProxyConfigService {
         if (!inputHost.configProfileInboundUuid) return null;
 
         const inbound = inputHost.rawInbound as Partial<InboundConfig> | null;
-        const network = this.resolveUserRouteNetwork(inbound);
+        const network = resolveUserRouteNetwork(inbound);
         const candidates = routes.filter(
             (route) =>
                 route.hostUuid === inputHost.uuid &&
                 route.configProfileInboundUuid === inputHost.configProfileInboundUuid &&
-                route.network === network,
+                (route.network === network || (network === 'tcp,udp' && route.network === 'tcp')),
         );
 
         if (candidates.length === 0) return null;
@@ -865,19 +917,6 @@ export class ResolveProxyConfigService {
         }
 
         return candidates[0];
-    }
-
-    private resolveUserRouteNetwork(inbound: Partial<InboundConfig> | null): 'tcp' | 'udp' {
-        if (!inbound) return 'tcp';
-
-        if (
-            inbound.protocol === 'hysteria' ||
-            (inbound as unknown as { type?: string }).type === 'hysteria2'
-        )
-            return 'udp';
-
-        const network = (inbound.streamSettings as { network?: string } | undefined)?.network;
-        return network === 'hysteria' || network === 'quic' ? 'udp' : 'tcp';
     }
 
     private resolveRandomizedValue(value: string): string {

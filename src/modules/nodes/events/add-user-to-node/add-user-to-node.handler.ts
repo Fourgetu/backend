@@ -7,6 +7,7 @@ import { AddUserCommand as AddUserToNodeCommandSdk } from '@remnawave/node-contr
 import {
     getCipherTypeFromString,
     getSsPassword,
+    getMethodFromRawInbound,
     isSS2022Method,
 } from '@common/helpers/xray-config/ss-cipher';
 import { getVlessFlowFromDbInbound } from '@common/utils/flow/get-vless-flow';
@@ -96,7 +97,11 @@ export class AddUserToNodeHandler implements IEventHandler<AddUserToNodeEvent> {
                             return {
                                 type: inboundType,
                                 username: id.toString(),
-                                password: getSsPassword(ssPassword, true),
+                                password: getSsPassword(
+                                    ssPassword,
+                                    true,
+                                    getMethodFromRawInbound(inbound.rawInbound),
+                                ),
                                 tag: inbound.tag,
                             };
                         case 'hysteria':
@@ -131,7 +136,11 @@ export class AddUserToNodeHandler implements IEventHandler<AddUserToNodeEvent> {
 
                 const activeTags = new Set(node.activeInbounds.map((inbound) => inbound.tag));
 
-                if (node.activeInbounds.some((inbound) => inbound.type === 'socks')) {
+                if (
+                    node.activeInbounds.some(
+                        (inbound) => inbound.type === 'socks' || isSS2022Method(inbound.rawInbound),
+                    )
+                ) {
                     await this.nodesQueuesService.startNode({ nodeUuid: node.uuid });
                     continue;
                 }

@@ -30,6 +30,36 @@ export class UserRoutesRepository {
         return result ? this.converter.fromPrismaModelToEntity(result) : null;
     }
 
+    async hasOverlappingRoute(
+        route: {
+            nodeUuid: string;
+            userId: number | bigint;
+            configProfileInboundUuid: string;
+            hostUuid: string;
+            network: string;
+        },
+        excludeUuid?: string,
+    ): Promise<boolean> {
+        return Boolean(
+            await this.prisma.userRoutes.findFirst({
+                where: {
+                    nodeUuid: route.nodeUuid,
+                    userId: BigInt(route.userId),
+                    configProfileInboundUuid: route.configProfileInboundUuid,
+                    hostUuid: route.hostUuid,
+                    network: {
+                        in:
+                            route.network === 'tcp,udp'
+                                ? ['tcp', 'udp', 'tcp,udp']
+                                : [route.network, 'tcp,udp'],
+                    },
+                    ...(excludeUuid ? { uuid: { not: excludeUuid } } : {}),
+                },
+                select: { uuid: true },
+            }),
+        );
+    }
+
     async create(data: Prisma.UserRoutesUncheckedCreateInput): Promise<UserRouteEntity> {
         const result = await this.prisma.userRoutes.create({ data });
         return this.converter.fromPrismaModelToEntity(result);
@@ -69,7 +99,15 @@ export class UserRoutesRepository {
     async listPorts(nodeUuid: string, network: string): Promise<number[]> {
         const [routes, hosts, inbounds] = await Promise.all([
             this.prisma.userRoutes.findMany({
-                where: { nodeUuid, network },
+                where: {
+                    nodeUuid,
+                    network: {
+                        in:
+                            network === 'tcp,udp'
+                                ? ['tcp', 'udp', 'tcp,udp']
+                                : [network, 'tcp,udp'],
+                    },
+                },
                 select: { externalPort: true },
             }),
             this.prisma.hostsToNodes.findMany({

@@ -106,6 +106,7 @@ function serviceFixture({
         userRoutes: { findMany: async () => [] },
     };
     const repository = {
+        hasOverlappingRoute: async () => false,
         listPorts: async () => [],
         create: async (data: Record<string, unknown>) => {
             route = {

@@ -20,6 +20,11 @@ import { PortRangeAllocator } from './port-range-allocator.service';
 import { UserRoutesRepository } from './repositories';
 import { isHostCompatibleWithUserRoute } from './user-route-host-compatibility';
 import { isUserRouteListenerAllowed } from './user-route-listener';
+import {
+    resolveUserRouteNetwork,
+    splitUserRouteNetwork,
+    userRouteServiceName,
+} from './user-route-network';
 
 const DEFAULT_PORT_START = 32000;
 const DEFAULT_PORT_END = 32999;
@@ -52,7 +57,7 @@ export class UserRoutesService implements OnApplicationBootstrap {
                         where: { uuid: route.uuid },
                         data: {
                             gostForwardId: route.uuid,
-                            gostServiceName: `user-route-${route.uuid}-${route.network}`,
+                            gostServiceName: userRouteServiceName(route.uuid, route.network),
                         },
                     }),
                 ),
@@ -134,6 +139,12 @@ export class UserRoutesService implements OnApplicationBootstrap {
         try {
             const references = await this.validateReferences(dto);
             if (!references.isOk) return references;
+            if (await this.repository.hasOverlappingRoute(dto)) {
+                return fail({
+                    ...ERRORS.USER_ROUTE_PORT_ALREADY_EXISTS,
+                    message: 'An existing route already covers this Host and network.',
+                });
+            }
 
             const externalPort =
                 dto.externalPort ?? (await this.allocatePort(dto.nodeUuid, dto.network));
@@ -169,7 +180,7 @@ export class UserRoutesService implements OnApplicationBootstrap {
                 network: dto.network,
                 enabled: dto.enabled,
                 gostForwardId: routeUuid,
-                gostServiceName: `user-route-${routeUuid}-${dto.network}`,
+                gostServiceName: userRouteServiceName(routeUuid, dto.network),
             });
 
             try {
@@ -272,11 +283,22 @@ export class UserRoutesService implements OnApplicationBootstrap {
             }
 
             if (dto.network !== undefined) {
+                if (
+                    await this.repository.hasOverlappingRoute(
+                        { ...existing, network: dto.network },
+                        dto.uuid,
+                    )
+                ) {
+                    return fail({
+                        ...ERRORS.USER_ROUTE_PORT_ALREADY_EXISTS,
+                        message: 'An existing route already covers this Host and network.',
+                    });
+                }
                 const inbound = await this.prisma.configProfileInbounds.findUnique({
                     where: { uuid: existing.configProfileInboundUuid },
                     select: { rawInbound: true },
                 });
-                if (!inbound || dto.network !== this.resolveInboundNetwork(inbound.rawInbound)) {
+                if (!inbound || !this.isInboundNetworkAllowed(inbound.rawInbound, dto.network)) {
                     return fail({
                         code: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
                         message: 'GOST route network must match the selected proxy-core inbound',
@@ -318,7 +340,7 @@ export class UserRoutesService implements OnApplicationBootstrap {
                 ...(dto.network === undefined ? {} : { network: dto.network }),
                 ...(dto.network === undefined
                     ? {}
-                    : { gostServiceName: `user-route-${existing.uuid}-${dto.network}` }),
+                    : { gostServiceName: userRouteServiceName(existing.uuid, dto.network) }),
                 ...(dto.enabled === undefined ? {} : { enabled: dto.enabled }),
             };
             await this.repository.update(dto.uuid, data);
@@ -510,11 +532,11 @@ export class UserRoutesService implements OnApplicationBootstrap {
             return fail({
                 code: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
                 message:
-                    'GOST requires a matching loopback listener, or explicit public-inbound compatibility for Xray listening on 0.0.0.0 with target 127.0.0.1',
+                    'GOST requires a matching loopback listener, or explicit public-inbound compatibility for Xray/sing-box wildcard listeners with a matching loopback target',
                 httpCode: 400,
             });
         }
-        if (dto.network !== this.resolveInboundNetwork(inbound.rawInbound)) {
+        if (!this.isInboundNetworkAllowed(inbound.rawInbound, dto.network)) {
             return fail({
                 code: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
                 message: 'GOST route network must match the selected proxy-core inbound',
@@ -524,19 +546,9 @@ export class UserRoutesService implements OnApplicationBootstrap {
         return ok(true);
     }
 
-    private resolveInboundNetwork(rawInbound: unknown): 'tcp' | 'udp' {
-        if (!rawInbound || typeof rawInbound !== 'object' || Array.isArray(rawInbound))
-            return 'tcp';
-
-        const inbound = rawInbound as {
-            protocol?: unknown;
-            type?: unknown;
-            streamSettings?: { network?: unknown };
-        };
-        if (inbound.protocol === 'hysteria' || inbound.type === 'hysteria2') return 'udp';
-
-        const network = inbound.streamSettings?.network;
-        return network === 'hysteria' || network === 'quic' ? 'udp' : 'tcp';
+    private isInboundNetworkAllowed(rawInbound: unknown, requested: string): boolean {
+        const supported = splitUserRouteNetwork(resolveUserRouteNetwork(rawInbound));
+        return splitUserRouteNetwork(requested).every((network) => supported.includes(network));
     }
 
     private async validatePortHoppingConfig(
@@ -630,31 +642,33 @@ export class UserRoutesService implements OnApplicationBootstrap {
 
         const runtime = await this.axiosService.syncGostForwards(
             {
-                forwards: routes.map((route) => ({
-                    id: route.uuid,
-                    externalPort: route.externalPort,
-                    internalAddress: route.internalAddress as '127.0.0.1' | '::1',
-                    internalPort: route.internalPort,
-                    network: route.network as 'tcp' | 'udp',
-                    downloadBytesPerSecond:
-                        route.speedLimit?.enabled && route.speedLimit.downloadBytesPerSecond
-                            ? Number(route.speedLimit.downloadBytesPerSecond)
-                            : 0,
-                    uploadBytesPerSecond:
-                        route.speedLimit?.enabled && route.speedLimit.uploadBytesPerSecond
-                            ? Number(route.speedLimit.uploadBytesPerSecond)
-                            : 0,
-                    enabled: route.enabled,
-                    ...(route.portHoppingConfig?.enabled && route.hopStartPort !== null
-                        ? { hopStartPort: route.hopStartPort }
-                        : {}),
-                    ...(route.portHoppingConfig?.enabled && route.hopEndPort !== null
-                        ? { hopEndPort: route.hopEndPort }
-                        : {}),
-                    ...(route.portHoppingConfig?.enabled
-                        ? { hopIntervalSeconds: route.portHoppingConfig.hopIntervalSeconds }
-                        : {}),
-                })),
+                forwards: routes.flatMap((route) =>
+                    splitUserRouteNetwork(route.network).map((network) => ({
+                        id: route.uuid,
+                        externalPort: route.externalPort,
+                        internalAddress: route.internalAddress as '127.0.0.1' | '::1',
+                        internalPort: route.internalPort,
+                        network,
+                        downloadBytesPerSecond:
+                            route.speedLimit?.enabled && route.speedLimit.downloadBytesPerSecond
+                                ? Number(route.speedLimit.downloadBytesPerSecond)
+                                : 0,
+                        uploadBytesPerSecond:
+                            route.speedLimit?.enabled && route.speedLimit.uploadBytesPerSecond
+                                ? Number(route.speedLimit.uploadBytesPerSecond)
+                                : 0,
+                        enabled: route.enabled,
+                        ...(route.portHoppingConfig?.enabled && route.hopStartPort !== null
+                            ? { hopStartPort: route.hopStartPort }
+                            : {}),
+                        ...(route.portHoppingConfig?.enabled && route.hopEndPort !== null
+                            ? { hopEndPort: route.hopEndPort }
+                            : {}),
+                        ...(route.portHoppingConfig?.enabled
+                            ? { hopIntervalSeconds: route.portHoppingConfig.hopIntervalSeconds }
+                            : {}),
+                    })),
+                ),
             },
             { nodeUuid, address: node.address, port: node.port, proxyUrl: node.proxyUrl },
         );

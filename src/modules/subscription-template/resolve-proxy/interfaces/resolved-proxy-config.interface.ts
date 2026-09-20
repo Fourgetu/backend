@@ -228,6 +228,7 @@ export interface IProxyEntryMetadata {
 // ─── Resolved Proxy Config ───────────────────────────────
 
 export type ResolvedProxyConfig = {
+    udpEnabled?: boolean;
     finalRemark: string;
     address: string;
     port: number;

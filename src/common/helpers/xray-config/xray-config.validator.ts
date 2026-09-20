@@ -101,7 +101,10 @@ export class XRayConfig {
                 tag: inbound.tag!,
                 rawInbound: inbound as unknown as object,
                 type: inbound.protocol,
-                network: inbound.streamSettings?.network ?? null,
+                network:
+                    inbound.protocol === 'shadowsocks'
+                        ? (inbound.settings?.network ?? 'tcp,udp')
+                        : (inbound.streamSettings?.network ?? null),
                 security: inbound.streamSettings?.security ?? null,
                 port: this.parsePort(inbound.port),
             }));
@@ -208,7 +211,18 @@ export class XRayConfig {
         return this.config;
     }
 
-    public finalizeInboundClients(): void {}
+    public finalizeInboundClients(): void {
+        // Empty SS2022 client arrays may select a single-user server using the
+        // shared server key. Never emit that fallback for a managed inbound.
+        this.config.inbounds = this.config.inbounds?.filter(
+            (inbound) =>
+                !(
+                    inbound.protocol === 'shadowsocks' &&
+                    isSS2022MethodFromMethod(inbound.settings?.method) &&
+                    (inbound.settings?.clients?.length ?? 0) === 0
+                ),
+        );
+    }
 
     private groupUsersByTag(
         users: UserForConfigEntity[],
@@ -291,7 +305,7 @@ export class XRayConfig {
 
                 for (const user of users) {
                     inbound.settings.clients.push({
-                        password: getSsPassword(user.ssPassword, isSS2022),
+                        password: getSsPassword(user.ssPassword, isSS2022, method),
                         ...(!isSS2022 && { method: method || 'chacha20-ietf-poly1305' }),
                         email: user.id.toString(),
                         id: user.vlessUuid,
@@ -494,6 +508,11 @@ export class XRayConfig {
         }
 
         const method = settings.method;
+        if (method === '2022-blake3-chacha20-poly1305') {
+            throw new Error(
+                'Xray 26.7.28 / sing-box 1.13.14 do not support SS2022 ChaCha20 Managed Users.',
+            );
+        }
         if (!method) return;
 
         if (!SHADOWSOCKS_METHODS.some((m) => m === method)) {
@@ -511,10 +530,13 @@ export class XRayConfig {
                 );
             }
             // https://xtls.github.io/config/inbounds/shadowsocks.html#inboundconfigurationobject
-            if (getDecodedKeySize(settings.password) !== 32) {
+            const keySize = method === '2022-blake3-aes-128-gcm' ? 16 : 32;
+            if (
+                getDecodedKeySize(settings.password) !== keySize ||
+                Buffer.from(settings.password, 'base64').toString('base64') !== settings.password
+            ) {
                 throw new Error(
-                    `Shadowsocks password for "${method}" must be a base64 string that decodes to exactly 32 bytes. ` +
-                        `(inbound → settings → password – generate with: openssl rand -base64 32)`,
+                    `Shadowsocks password for "${method}" must be canonical base64 encoding of ${keySize} bytes.`,
                 );
             }
         }

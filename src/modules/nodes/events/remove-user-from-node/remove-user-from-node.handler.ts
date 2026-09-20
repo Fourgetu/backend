@@ -3,6 +3,8 @@ import { IEventHandler, EventsHandler } from '@nestjs/cqrs';
 
 import { RemoveUserCommand as RemoveUserFromNodeCommandSdk } from '@remnawave/node-contract';
 
+import { isSS2022Method } from '@common/helpers/xray-config/ss-cipher';
+
 import { NodesQueuesService } from '@queue/_nodes';
 
 import { NodesRepository } from '../../repositories/nodes.repository';
@@ -32,10 +34,15 @@ export class RemoveUserFromNodeHandler implements IEventHandler<RemoveUserFromNo
             };
 
             const dynamicNodes = nodes.filter(
-                (node) => !node.activeInbounds.some((inbound) => inbound.type === 'socks'),
+                (node) =>
+                    !node.activeInbounds.some(
+                        (inbound) => inbound.type === 'socks' || isSS2022Method(inbound.rawInbound),
+                    ),
             );
             const restartNodes = nodes.filter((node) =>
-                node.activeInbounds.some((inbound) => inbound.type === 'socks'),
+                node.activeInbounds.some(
+                    (inbound) => inbound.type === 'socks' || isSS2022Method(inbound.rawInbound),
+                ),
             );
 
             await this.nodesQueuesService.removeUserFromNodeBulk(

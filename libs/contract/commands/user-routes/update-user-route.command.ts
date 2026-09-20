@@ -22,7 +22,7 @@ export namespace UpdateUserRouteCommand {
         externalPort: port.optional(),
         internalAddress: z.string().optional(),
         internalPort: port.optional(),
-        network: z.enum(['tcp', 'udp']).optional(),
+        network: z.enum(['tcp', 'udp', 'tcp,udp']).optional(),
         enabled: z.boolean().optional(),
     });
     export const ResponseSchema = z.object({ response: UserRouteSchema });
