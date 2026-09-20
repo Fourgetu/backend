@@ -1,8 +1,9 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import consola from 'consola';
 
-import { XRayConfig } from '@common/helpers/xray-config';
+import { createCoreConfig } from '@common/helpers/core-config';
 import { diffInbounds } from '@common/utils/inbounds';
+import type { TConfigProfileCoreType } from '@libs/contracts/constants';
 
 export async function syncInbounds(prisma: PrismaClient) {
     consola.start('Syncing inbounds...');
@@ -12,7 +13,10 @@ export async function syncInbounds(prisma: PrismaClient) {
     for (const configProfile of configProfiles) {
         consola.start(`Syncing ${configProfile.name}...`);
 
-        const validatedConfig = new XRayConfig(configProfile.config as object);
+        const validatedConfig = createCoreConfig(
+            configProfile.coreType as TConfigProfileCoreType,
+            configProfile.config as object,
+        );
 
         const existingInbounds = await prisma.configProfileInbounds.findMany({
             where: {

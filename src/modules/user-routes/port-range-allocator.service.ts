@@ -33,7 +33,11 @@ export class PortRangeAllocator {
 
     public validate(config: PortHoppingConfigShape): string[] {
         const errors: string[] = [];
-        if (!Number.isInteger(config.poolStart) || config.poolStart < 1 || config.poolStart > 65_535)
+        if (
+            !Number.isInteger(config.poolStart) ||
+            config.poolStart < 1 ||
+            config.poolStart > 65_535
+        )
             errors.push('poolStart');
         if (!Number.isInteger(config.poolEnd) || config.poolEnd < 1 || config.poolEnd > 65_535)
             errors.push('poolEnd');
@@ -61,20 +65,11 @@ export class PortRangeAllocator {
         end: number,
         excludeRouteUuid?: string,
     ): Promise<PortRangeConflict[]> {
-        return this.detectConflictWithClient(
-            this.prisma,
-            nodeUuid,
-            start,
-            end,
-            excludeRouteUuid,
-        );
+        return this.detectConflictWithClient(this.prisma, nodeUuid, start, end, excludeRouteUuid);
     }
 
     /** Allocates and persists the first deterministic free block for an existing UserRoute. */
-    public async allocate(
-        routeUuid: string,
-        configUuid: string,
-    ): Promise<PortRangeAllocation> {
+    public async allocate(routeUuid: string, configUuid: string): Promise<PortRangeAllocation> {
         return this.prisma.$transaction(
             async (tx) => {
                 const route = await tx.userRoutes.findUnique({ where: { uuid: routeUuid } });
@@ -90,10 +85,10 @@ export class PortRangeAllocator {
                     throw new Error(`Invalid PortHoppingConfig fields: ${invalid.join(', ')}`);
                 if (!config.enabled) throw new Error('PortHoppingConfig is disabled.');
 
-                await tx.$queryRaw`
+                await tx.$queryRaw<Array<{ lock: string }>>`
                     SELECT pg_advisory_xact_lock(
                         hashtextextended(${`${configUuid}:${route.nodeUuid}`}, 0)
-                    )
+                    )::text AS lock
                 `;
 
                 const refreshed = await tx.userRoutes.findUniqueOrThrow({

@@ -177,6 +177,14 @@ export class UserRoutesService implements OnApplicationBootstrap {
                     await this.portRangeAllocator.allocate(route.uuid, dto.portHoppingConfigUuid);
                 }
             } catch (error) {
+                this.logger.warn({
+                    message: 'Hysteria2 port hopping allocation failed',
+                    nodeUuid: dto.nodeUuid,
+                    inboundUuid: dto.configProfileInboundUuid,
+                    portHoppingConfigUuid: dto.portHoppingConfigUuid,
+                    errorCode: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
+                    error: this.safeErrorMessage(error),
+                });
                 await this.repository.delete(route.uuid).catch(() => void 0);
                 return fail({
                     code: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
@@ -323,6 +331,14 @@ export class UserRoutesService implements OnApplicationBootstrap {
                     }
                 }
             } catch (error) {
+                this.logger.warn({
+                    message: 'Hysteria2 port hopping update failed',
+                    nodeUuid: existing.nodeUuid,
+                    inboundUuid: existing.configProfileInboundUuid,
+                    portHoppingConfigUuid: dto.portHoppingConfigUuid,
+                    errorCode: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
+                    error: this.safeErrorMessage(error),
+                });
                 await this.restoreRoute(existing);
                 return fail({
                     code: ERRORS.USER_ROUTE_REFERENCE_NOT_FOUND.code,
@@ -670,6 +686,15 @@ export class UserRoutesService implements OnApplicationBootstrap {
                 route.hopEndPort !== null,
         );
         if (requiresPortHopping && !runtime.response.portHopping.applied) {
+            this.logger.error({
+                message: 'User route Port Hopping synchronization failed',
+                nodeUuid,
+                requestPath: GOST_NODE_API.syncForwards,
+                errorCode: ERRORS.USER_ROUTE_RUNTIME_SYNC_FAILED.code,
+                portHoppingMode: runtime.response.portHopping.mode,
+                portHoppingAvailable: runtime.response.portHopping.available,
+                tlsInitializationStatus: this.axiosService.getNodeTransportInitializationStatus(),
+            });
             return fail(
                 ERRORS.USER_ROUTE_RUNTIME_SYNC_FAILED.withMessage(
                     runtime.response.portHopping.error ??
@@ -679,5 +704,10 @@ export class UserRoutesService implements OnApplicationBootstrap {
         }
 
         return runtime;
+    }
+
+    private safeErrorMessage(error: unknown): string {
+        if (error instanceof Error) return error.message;
+        return String(error);
     }
 }

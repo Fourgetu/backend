@@ -107,6 +107,8 @@ test('sing-box and Mihomo generators emit their correct per-user hopping fields'
     const singBoxOutbound = (
         singBox as unknown as { buildHysteria2Outbound: (value: never) => Record<string, unknown> }
     ).buildHysteria2Outbound(host(finalMask));
+    assert.equal(singBoxOutbound.server, 'edge.example.com');
+    assert.notEqual(singBoxOutbound.server, '127.0.0.1');
     assert.deepEqual(singBoxOutbound.server_ports, ['20000:20019']);
     assert.equal(singBoxOutbound.hop_interval, '30s');
     assert.equal(singBoxOutbound.server_port, 32_001);
@@ -117,6 +119,8 @@ test('sing-box and Mihomo generators emit their correct per-user hopping fields'
             buildHysteria2Node: (value: never, extended: boolean) => Record<string, unknown>;
         }
     ).buildHysteria2Node(host(finalMask), false);
+    assert.equal(mihomoNode.server, 'edge.example.com');
+    assert.notEqual(mihomoNode.server, '127.0.0.1');
     assert.equal(mihomoNode.ports, '20000-20019');
     assert.equal(mihomoNode['hop-interval'], '30s');
     assert.equal(mihomoNode.port, 32_001);
