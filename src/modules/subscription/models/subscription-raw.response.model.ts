@@ -16,6 +16,7 @@ export class SubscriptionRawResponse {
         username: string;
         userStatus: TUsersStatus;
         trafficLimitStrategy: TResetPeriods;
+        trafficLimitResetDay: number | null;
     };
     public links: string[];
     public ssConfLinks: Record<string, string>;

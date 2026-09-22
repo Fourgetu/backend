@@ -19,6 +19,8 @@ const entityToModel = (entity: BaseUserEntity): Users => {
 
         trafficLimitBytes: entity.trafficLimitBytes,
         trafficLimitStrategy: entity.trafficLimitStrategy,
+        trafficLimitResetDay: entity.trafficLimitResetDay,
+        trafficLimitResetAnchorAt: entity.trafficLimitResetAnchorAt,
 
         expireAt: entity.expireAt,
         subRevokedAt: entity.subRevokedAt,

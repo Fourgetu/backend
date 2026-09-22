@@ -19,6 +19,7 @@ export class ResetUserTrafficCalendarMonthRollingTask {
     async handleCron() {
         try {
             await this.usersQueuesService.resetMonthlyRollingUserTraffic();
+            await this.usersQueuesService.resetMonthlyCustomDayUserTraffic();
         } catch (error) {
             this.logger.error(`Error in ResetUserTrafficCalendarMonthRollingTask: ${error}`);
         }

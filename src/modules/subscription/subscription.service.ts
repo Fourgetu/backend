@@ -553,6 +553,7 @@ export class SubscriptionService {
                 isActive: user.status === USERS_STATUS.ACTIVE,
                 userStatus: user.status,
                 trafficLimitStrategy: user.trafficLimitStrategy,
+                trafficLimitResetDay: user.trafficLimitResetDay,
             },
             links,
             ssConfLinks,
@@ -623,7 +624,7 @@ export class SubscriptionService {
                 .join('; '),
         };
 
-        const refillDate = getSubscriptionRefillDate(user.trafficLimitStrategy);
+        const refillDate = getSubscriptionRefillDate(user);
         if (refillDate) {
             headers['subscription-refill-date'] = refillDate;
         }

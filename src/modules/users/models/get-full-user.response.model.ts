@@ -13,6 +13,7 @@ export class GetFullUserResponseModel {
 
     public readonly trafficLimitBytes: number;
     public readonly trafficLimitStrategy: TResetPeriods;
+    public readonly trafficLimitResetDay: number | null;
 
     public readonly expireAt: Date;
 
@@ -59,6 +60,7 @@ export class GetFullUserResponseModel {
 
         this.trafficLimitBytes = Number(entity.trafficLimitBytes);
         this.trafficLimitStrategy = entity.trafficLimitStrategy;
+        this.trafficLimitResetDay = entity.trafficLimitResetDay;
 
         this.expireAt = entity.expireAt;
 

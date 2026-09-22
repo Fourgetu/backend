@@ -188,6 +188,13 @@ export class UsersQueuesService implements OnApplicationBootstrap {
         );
     }
 
+    public async resetMonthlyCustomDayUserTraffic() {
+        return this.resetUserTrafficQueue.add(
+            USERS_JOB_NAMES.RESET_MONTHLY_CUSTOM_DAY_USER_TRAFFIC,
+            {},
+        );
+    }
+
     public async resetWeeklyUserTraffic() {
         return this.resetUserTrafficQueue.add(USERS_JOB_NAMES.RESET_WEEKLY_USER_TRAFFIC, {});
     }

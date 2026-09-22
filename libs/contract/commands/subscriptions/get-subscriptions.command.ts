@@ -46,6 +46,7 @@ export namespace GetSubscriptionsCommand {
                         isActive: z.boolean(),
                         userStatus: z.enum(USERS_STATUS),
                         trafficLimitStrategy: z.enum(RESET_PERIODS),
+                        trafficLimitResetDay: z.number().int().min(1).max(31).nullable(),
                     }),
                     links: z.array(z.string()),
                     ssConfLinks: z.record(z.string(), z.string()),

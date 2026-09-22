@@ -16,7 +16,7 @@ import {
     wrapBigInt,
     wrapBigIntNullable,
 } from '@common/utils';
-import { ERRORS, USERS_STATUS, EVENTS } from '@libs/contracts/constants';
+import { ERRORS, EVENTS, RESET_PERIODS, USERS_STATUS } from '@libs/contracts/constants';
 
 import { UserEvent } from '@integration-modules/notifications/interfaces';
 
@@ -47,6 +47,7 @@ import {
     ResolveUserResponseModel,
 } from './models';
 import { UsersRepository } from './repositories/users.repository';
+import { resolveTrafficResetScheduleUpdate } from './utils/monthly-custom-reset.util';
 
 @Injectable()
 export class UsersService {
@@ -70,6 +71,7 @@ export class UsersService {
 
     public async createUser(dto: CreateUserBodyDto): Promise<TResult<UserEntity>> {
         try {
+            const createdAt = dto.createdAt ?? new Date();
             const userEntity = new BaseUserEntity({
                 username: dto.username,
                 shortUuid: dto.shortUuid || this.generateShortUuid(),
@@ -81,10 +83,16 @@ export class UsersService {
                 status: dto.status,
                 trafficLimitBytes: wrapBigInt(dto.trafficLimitBytes),
                 trafficLimitStrategy: dto.trafficLimitStrategy,
+                trafficLimitResetDay:
+                    dto.trafficLimitStrategy === RESET_PERIODS.MONTH_CUSTOM_DAY
+                        ? dto.trafficLimitResetDay
+                        : null,
+                trafficLimitResetAnchorAt:
+                    dto.trafficLimitStrategy === RESET_PERIODS.MONTH_CUSTOM_DAY ? createdAt : null,
                 email: dto.email,
                 telegramId: wrapBigIntNullable(dto.telegramId),
                 expireAt: dto.expireAt,
-                createdAt: dto.createdAt,
+                createdAt,
                 lastTrafficResetAt: dto.lastTrafficResetAt,
                 description: dto.description,
                 hwidDeviceLimit: dto.hwidDeviceLimit,
@@ -161,10 +169,24 @@ export class UsersService {
 
             if (!user) return fail(ERRORS.USER_NOT_FOUND);
 
+            const trafficResetSchedule = resolveTrafficResetScheduleUpdate({
+                currentStrategy: user.trafficLimitStrategy,
+                currentResetDay: user.trafficLimitResetDay,
+                requestedStrategy: dto.trafficLimitStrategy,
+                requestedResetDay: dto.trafficLimitResetDay,
+                changedAt: new Date(),
+            });
+
             const newUserEntity = new BaseUserEntity({
                 ...rest,
                 id: user.id,
                 trafficLimitBytes: wrapBigInt(trafficLimitBytes),
+                trafficLimitStrategy: dto.trafficLimitStrategy,
+                trafficLimitResetDay:
+                    dto.trafficLimitStrategy !== undefined || dto.trafficLimitResetDay !== undefined
+                        ? trafficResetSchedule.resetDay
+                        : undefined,
+                trafficLimitResetAnchorAt: trafficResetSchedule.scheduleAnchor,
                 telegramId: wrapBigIntNullable(telegramId),
                 lastTriggeredThreshold: trafficLimitBytes !== undefined ? 0 : undefined,
             });

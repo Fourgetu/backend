@@ -9,6 +9,8 @@ export class BaseUserEntity implements Users {
 
     public trafficLimitBytes: bigint;
     public trafficLimitStrategy: TResetPeriods;
+    public trafficLimitResetDay: number | null;
+    public trafficLimitResetAnchorAt: Date | null;
 
     public expireAt: Date;
     public subRevokedAt: Date | null;

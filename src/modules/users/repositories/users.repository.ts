@@ -6,7 +6,7 @@ import type {
     IUserStats,
 } from '../interfaces';
 
-import { TResetPeriods, TUsersStatus, USERS_STATUS } from '@contract/constants';
+import { RESET_PERIODS, TResetPeriods, TUsersStatus, USERS_STATUS } from '@contract/constants';
 import { Transactional, TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterPrisma } from '@nestjs-cls/transactional-adapter-prisma';
 import dayjs from 'dayjs';
@@ -614,7 +614,7 @@ export class UsersRepository {
             .where('status', '!=', USERS_STATUS.LIMITED)
             .orderBy('id');
 
-        if (strategy === 'MONTH_ROLLING') {
+        if (strategy === RESET_PERIODS.MONTH_ROLLING) {
             targetIdsQuery = targetIdsQuery
                 .where(sql`("created_at" + interval '1 month')::date`, '<=', sql`CURRENT_DATE`)
                 .where(
@@ -624,7 +624,33 @@ export class UsersRepository {
                             )`,
                     '=',
                     sql`EXTRACT(DAY FROM CURRENT_DATE)`,
+                )
+                .where(
+                    sql<boolean>`("last_traffic_reset_at" IS NULL OR "last_traffic_reset_at" < CURRENT_DATE)`,
                 );
+        } else if (strategy === RESET_PERIODS.MONTH_CUSTOM_DAY) {
+            targetIdsQuery = targetIdsQuery
+                .where('trafficLimitResetDay', 'is not', null)
+                .where(
+                    sql`LEAST(
+                            "traffic_limit_reset_day",
+                            EXTRACT(DAY FROM date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day')
+                        )`,
+                    '=',
+                    sql`EXTRACT(DAY FROM CURRENT_DATE)`,
+                )
+                .where(
+                    sql`COALESCE("traffic_limit_reset_anchor_at", "created_at")`,
+                    '<=',
+                    sql`CURRENT_DATE`,
+                )
+                .where(
+                    sql<boolean>`("last_traffic_reset_at" IS NULL OR "last_traffic_reset_at" < CURRENT_DATE)`,
+                );
+        } else if (strategy !== RESET_PERIODS.NO_RESET) {
+            targetIdsQuery = targetIdsQuery.where(
+                sql<boolean>`("last_traffic_reset_at" IS NULL OR "last_traffic_reset_at" < CURRENT_DATE)`,
+            );
         }
 
         const targetIds = await targetIdsQuery.execute();
@@ -645,15 +671,22 @@ export class UsersRepository {
             const batchStartTime = getTime();
 
             await this.qb.kysely
-                .with('lockedUsers', (db) =>
-                    db
+                .with('lockedUsers', (db) => {
+                    let lockedUsersQuery = db
                         .selectFrom('users')
                         .select('id')
                         .where(
                             sql<boolean>`"users"."id" = ANY(string_to_array(${batchIds.map((r) => r.id).join(',')}, ',')::bigint[])`,
-                        )
-                        .forUpdate(),
-                )
+                        );
+
+                    if (strategy !== RESET_PERIODS.NO_RESET) {
+                        lockedUsersQuery = lockedUsersQuery.where(
+                            sql<boolean>`("last_traffic_reset_at" IS NULL OR "last_traffic_reset_at" < CURRENT_DATE)`,
+                        );
+                    }
+
+                    return lockedUsersQuery.forUpdate();
+                })
                 .with('updateUsers', (db) =>
                     db
                         .updateTable('users')
@@ -690,7 +723,7 @@ export class UsersRepository {
             .orderBy('id')
             .forUpdate();
 
-        if (strategy === 'MONTH_ROLLING') {
+        if (strategy === RESET_PERIODS.MONTH_ROLLING) {
             targetIdsQuery = targetIdsQuery
                 .where(sql`("created_at" + interval '1 month')::date`, '<=', sql`CURRENT_DATE`)
                 .where(
@@ -700,7 +733,33 @@ export class UsersRepository {
                         )`,
                     '=',
                     sql`EXTRACT(DAY FROM CURRENT_DATE)`,
+                )
+                .where(
+                    sql<boolean>`("last_traffic_reset_at" IS NULL OR "last_traffic_reset_at" < CURRENT_DATE)`,
                 );
+        } else if (strategy === RESET_PERIODS.MONTH_CUSTOM_DAY) {
+            targetIdsQuery = targetIdsQuery
+                .where('trafficLimitResetDay', 'is not', null)
+                .where(
+                    sql`LEAST(
+                            "traffic_limit_reset_day",
+                            EXTRACT(DAY FROM date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day')
+                        )`,
+                    '=',
+                    sql`EXTRACT(DAY FROM CURRENT_DATE)`,
+                )
+                .where(
+                    sql`COALESCE("traffic_limit_reset_anchor_at", "created_at")`,
+                    '<=',
+                    sql`CURRENT_DATE`,
+                )
+                .where(
+                    sql<boolean>`("last_traffic_reset_at" IS NULL OR "last_traffic_reset_at" < CURRENT_DATE)`,
+                );
+        } else if (strategy !== RESET_PERIODS.NO_RESET) {
+            targetIdsQuery = targetIdsQuery.where(
+                sql<boolean>`("last_traffic_reset_at" IS NULL OR "last_traffic_reset_at" < CURRENT_DATE)`,
+            );
         }
 
         const result = await this.qb.kysely

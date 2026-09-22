@@ -18,39 +18,63 @@ export namespace BulkUpdateUsersCommand {
 
     export const RequestBodySchema = z.object({
         userIds: z.array(z.number()).min(1).max(500),
-        fields: z.object({
-            status: UsersSchema.shape.status.optional(),
-            trafficLimitBytes: z.optional(
-                z.number().min(0).describe('Traffic limit in bytes. 0 - unlimited'),
-            ),
-            trafficLimitStrategy: z.optional(
-                z.enum(RESET_PERIODS).describe('Available reset periods'),
-            ),
-            expireAt: z.optional(
-                z.iso
-                    .datetime({ local: true, offset: true })
-                    .transform((str) => new Date(str))
-                    .refine((date) => date > new Date(), {
-                        error: 'Expiration date cannot be in the past',
-                    })
-                    .describe('Expiration date: 2025-01-17T15:38:45.065Z'),
-            ),
-            description: z.string().nullish(),
-            telegramId: z.number().nullish(),
-            email: z.email().nullish(),
-            tag: z.optional(
-                z
-                    .string()
-                    .regex(
-                        /^[A-Z0-9_]+$/,
-                        'Tag can only contain uppercase letters, numbers, underscores',
-                    )
-                    .max(16, 'Tag must be less than 16 characters')
-                    .nullable(),
-            ),
-            hwidDeviceLimit: z.int().min(0).nullish(),
-            externalSquadUuid: z.uuid().nullish().describe('Optional. External squad UUID.'),
-        }),
+        fields: z
+            .object({
+                status: UsersSchema.shape.status.optional(),
+                trafficLimitBytes: z.optional(
+                    z.number().min(0).describe('Traffic limit in bytes. 0 - unlimited'),
+                ),
+                trafficLimitStrategy: z.optional(
+                    z.enum(RESET_PERIODS).describe('Available reset periods'),
+                ),
+                trafficLimitResetDay: z.number().int().min(1).max(31).nullable().optional(),
+                expireAt: z.optional(
+                    z.iso
+                        .datetime({ local: true, offset: true })
+                        .transform((str) => new Date(str))
+                        .refine((date) => date > new Date(), {
+                            error: 'Expiration date cannot be in the past',
+                        })
+                        .describe('Expiration date: 2025-01-17T15:38:45.065Z'),
+                ),
+                description: z.string().nullish(),
+                telegramId: z.number().nullish(),
+                email: z.email().nullish(),
+                tag: z.optional(
+                    z
+                        .string()
+                        .regex(
+                            /^[A-Z0-9_]+$/,
+                            'Tag can only contain uppercase letters, numbers, underscores',
+                        )
+                        .max(16, 'Tag must be less than 16 characters')
+                        .nullable(),
+                ),
+                hwidDeviceLimit: z.int().min(0).nullish(),
+                externalSquadUuid: z.uuid().nullish().describe('Optional. External squad UUID.'),
+            })
+            .superRefine((fields, ctx) => {
+                if (
+                    fields.trafficLimitStrategy === RESET_PERIODS.MONTH_CUSTOM_DAY &&
+                    fields.trafficLimitResetDay == null
+                ) {
+                    ctx.addIssue({
+                        code: 'custom',
+                        path: ['trafficLimitResetDay'],
+                        message: 'Traffic reset day is required for monthly custom day strategy',
+                    });
+                }
+                if (
+                    fields.trafficLimitResetDay != null &&
+                    fields.trafficLimitStrategy !== RESET_PERIODS.MONTH_CUSTOM_DAY
+                ) {
+                    ctx.addIssue({
+                        code: 'custom',
+                        path: ['trafficLimitStrategy'],
+                        message: 'Monthly custom day strategy is required when setting reset day',
+                    });
+                }
+            }),
     });
 
     export type RequestBody = z.infer<typeof RequestBodySchema>;

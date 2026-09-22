@@ -9,6 +9,7 @@ export const UsersSchema = z.object({
     status: z.enum(USERS_STATUS),
     trafficLimitBytes: z.number(),
     trafficLimitStrategy: z.enum(RESET_PERIODS).describe('Available reset periods'),
+    trafficLimitResetDay: z.number().int().min(1).max(31).nullable(),
     expireAt: z.iso.datetime().transform((str) => new Date(str)),
     telegramId: z.nullable(z.number()),
     email: z.nullable(z.email()),

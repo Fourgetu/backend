@@ -8,7 +8,7 @@ import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { TypedConfigService } from '@common/config/app-config';
 import { ok, TResult } from '@common/types';
 import { wrapBigInt, wrapBigIntNullable } from '@common/utils';
-import { EVENTS, TUsersStatus, USERS_STATUS } from '@libs/contracts/constants';
+import { EVENTS, RESET_PERIODS, TUsersStatus, USERS_STATUS } from '@libs/contracts/constants';
 
 import { BulkAllExtendExpirationDateCommand } from '@modules/users/commands/bulk-all-extend-expiration-date';
 import { BulkDeleteByStatusCommand } from '@modules/users/commands/bulk-delete-by-status';
@@ -183,6 +183,18 @@ export class SerialUsersOperationsQueueProcessor extends WorkerHost {
             await this.commandBus.execute(
                 new BulkUpdateAllUsersCommand({
                     ...dto,
+                    trafficLimitResetDay:
+                        dto.trafficLimitStrategy === RESET_PERIODS.MONTH_CUSTOM_DAY
+                            ? dto.trafficLimitResetDay
+                            : dto.trafficLimitStrategy !== undefined
+                              ? null
+                              : undefined,
+                    trafficLimitResetAnchorAt:
+                        dto.trafficLimitStrategy === RESET_PERIODS.MONTH_CUSTOM_DAY
+                            ? new Date()
+                            : dto.trafficLimitStrategy !== undefined
+                              ? null
+                              : undefined,
                     lastTriggeredThreshold: dto.trafficLimitBytes !== undefined ? 0 : undefined,
                     trafficLimitBytes: wrapBigInt(dto.trafficLimitBytes),
                     telegramId: wrapBigIntNullable(dto.telegramId),

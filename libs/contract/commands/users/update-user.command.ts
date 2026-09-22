@@ -29,6 +29,7 @@ export namespace UpdateUserCommand {
                 .enum(RESET_PERIODS)
                 .describe('Traffic limit reset strategy')
                 .optional(),
+            trafficLimitResetDay: z.number().int().min(1).max(31).nullable().optional(),
             expireAt: z.iso
                 .datetime({ local: true, offset: true })
                 .transform((str) => new Date(str))
