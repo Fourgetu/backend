@@ -28,12 +28,11 @@ export const getNextMonthlyCustomResetAt = (
         configuredDay,
     );
     const today = startOfUtcDay(now);
-    const effectiveDay = startOfUtcDay(effectiveAt);
     const lastResetDay = lastTrafficResetAt ? startOfUtcDay(lastTrafficResetAt) : null;
 
     if (
         candidate < today ||
-        candidate < effectiveDay ||
+        candidate < effectiveAt ||
         (lastResetDay !== null && lastResetDay >= candidate)
     ) {
         const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));

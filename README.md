@@ -4,6 +4,8 @@ Backend for Remnawave Panel.
 
 Custom maintenance notes: [selected upstream fixes and compatibility changes (2026-10-13)](docs/upstream-safe-backports-20261013.md).
 
+Follow-up adaptation: [node edits and reset-date templates (2026-10-13)](docs/upstream-node-edit-reset-dates-20261013.md).
+
 Learn more about Remnawave Panel [here](https://docs.rw/).
 
 # Contributors

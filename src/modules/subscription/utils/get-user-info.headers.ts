@@ -1,9 +1,8 @@
 import dayjs from 'dayjs';
 
-import { RESET_PERIODS } from '@libs/contracts/constants';
+import { getNextTrafficResetAt } from '@common/utils/get-next-traffic-reset-at.util';
 
 import { UserEntity } from '@modules/users/entities';
-import { getNextMonthlyCustomResetAt } from '@modules/users/utils/monthly-custom-reset.util';
 
 interface SubscriptionUserInfo {
     download: number;
@@ -26,36 +25,6 @@ export function getSubscriptionRefillDate(
     user: UserEntity,
     currentDate: Date = new Date(),
 ): string | undefined {
-    const now = new Date(currentDate);
-
-    switch (user.trafficLimitStrategy) {
-        case 'DAY':
-            now.setDate(now.getDate() + 1);
-            now.setHours(0, 0, 0, 0);
-            return Math.floor(now.getTime() / 1000).toString();
-        case 'WEEK': {
-            now.setDate(now.getDate() + (8 - now.getDay()));
-            now.setHours(0, 5, 0, 0);
-            return Math.floor(now.getTime() / 1000).toString();
-        }
-        case 'MONTH': {
-            now.setDate(1);
-            now.setMonth(now.getMonth() + 1);
-            now.setHours(0, 10, 0, 0);
-            return Math.floor(now.getTime() / 1000).toString();
-        }
-        case RESET_PERIODS.MONTH_CUSTOM_DAY: {
-            if (user.trafficLimitResetDay === null) return undefined;
-
-            const nextResetAt = getNextMonthlyCustomResetAt(
-                now,
-                user.trafficLimitResetDay,
-                user.trafficLimitResetAnchorAt ?? user.createdAt,
-                user.lastTrafficResetAt,
-            );
-            return Math.floor(nextResetAt.getTime() / 1000).toString();
-        }
-        case 'NO_RESET':
-            return undefined;
-    }
+    const nextResetAt = getNextTrafficResetAt(user, currentDate);
+    return nextResetAt ? dayjs(nextResetAt).unix().toString() : undefined;
 }
