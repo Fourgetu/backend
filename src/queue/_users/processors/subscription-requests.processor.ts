@@ -168,7 +168,7 @@ export class SubscriptionRequestsQueueProcessor
             const fields: Record<string, string> = {
                 v: SUBSCRIPTION_REQUEST_STREAM_MESSAGE_VERSION,
                 userId: payload.userId.toString(),
-                ssrResponseType: payload.srrResponseType,
+                srrResponseType: payload.srrResponseType,
                 requestAt: new Date(payload.requestAt).toISOString(),
             };
 

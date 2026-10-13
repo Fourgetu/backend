@@ -230,10 +230,12 @@ export class NodesQueuesService implements OnApplicationBootstrap {
             payload,
             {
                 removeOnComplete: {
-                    age: 24 * 3_600,
+                    age: 12 * 3_600,
+                    count: 500,
                 },
                 removeOnFail: {
-                    age: 24 * 3_600,
+                    age: 12 * 3_600,
+                    count: 500,
                 },
             },
         );
@@ -283,10 +285,12 @@ export class NodesQueuesService implements OnApplicationBootstrap {
             payload,
             {
                 removeOnComplete: {
-                    age: 24 * 3_600,
+                    age: 12 * 3_600,
+                    count: 500,
                 },
                 removeOnFail: {
-                    age: 24 * 3_600,
+                    age: 12 * 3_600,
+                    count: 500,
                 },
             },
         );
