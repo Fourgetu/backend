@@ -17,12 +17,47 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: clone_test
+          POSTGRES_USER: clone_test
+          POSTGRES_PASSWORD: clone_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clone_test -d clone_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Verify vendored Node Contract
         run: npm run contract:check
+
+      - name: Set up supported Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.20.0'
+          cache: npm
+
+      - name: Test locked dependencies and Host transactions
+        env:
+          DATABASE_URL: postgresql://clone_test:clone_test@127.0.0.1:5432/clone_test
+          HOST_CLONE_TEST_DATABASE_URL: postgresql://clone_test:clone_test@127.0.0.1:5432/clone_test
+        run: |
+          npm ci --no-audit --no-fund
+          npm run migrate:generate
+          npm run test:unit
+          npx tsc --noEmit
+          npx prisma db push --skip-generate
+          npm run test:integration:host-clone
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -55,7 +90,7 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
 
-      - name: Create release
+      - name: Create draft pending image smoke checks
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -63,7 +98,8 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           prerelease: false
-          make_latest: true
+          draft: true
+          make_latest: false
           generate_release_notes: false
           body: |
             # Remnawave custom Backend image
