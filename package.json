@@ -36,6 +36,7 @@
     "lint:fix": "oxlint --fix",
     "check": "oxfmt --check && oxlint",
     "test:unit": "tsx --test tests/unit/*.test.ts",
+    "test:integration:host-clone": "tsx --test tests/integration/host-clone.test.ts",
     "test:e2e:user-disable-restore": "tsx tests/e2e/user-disable-restore.e2e.ts",
     "fix": "oxfmt && oxlint --fix"
   },

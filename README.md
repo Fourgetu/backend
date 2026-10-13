@@ -6,6 +6,8 @@ Custom maintenance notes: [selected upstream fixes and compatibility changes (20
 
 Follow-up adaptation: [node edits and reset-date templates (2026-10-13)](docs/upstream-node-edit-reset-dates-20261013.md).
 
+Third batch: [transactional Host cloning (2026-10-13)](docs/upstream-host-clone-20261013.md).
+
 Learn more about Remnawave Panel [here](https://docs.rw/).
 
 # Contributors

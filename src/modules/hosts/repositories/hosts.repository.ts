@@ -273,10 +273,23 @@ export class HostsRepository implements ICrud<HostsEntity> {
             .whereRef('h.uuid', '=', 'v.uuid')
             .execute();
 
-        await this.prisma.tx
-            .$executeRaw`SELECT setval('hosts_view_position_seq', (SELECT MAX(view_position) FROM hosts) + 1)`;
+        await this.syncViewPositionSequence();
 
         return true;
+    }
+
+    public async shiftViewPositionsAfter(viewPosition: number): Promise<void> {
+        await this.prisma.tx
+            .$executeRaw`UPDATE hosts SET view_position = view_position + 1 WHERE view_position > ${viewPosition}`;
+    }
+
+    public async lockHostOrder(): Promise<void> {
+        await this.prisma.tx.$executeRaw`LOCK TABLE hosts IN SHARE ROW EXCLUSIVE MODE`;
+    }
+
+    public async syncViewPositionSequence(): Promise<void> {
+        await this.prisma.tx
+            .$executeRaw`SELECT setval('hosts_view_position_seq', (SELECT MAX(view_position) FROM hosts) + 1)`;
     }
 
     public async findAllTags(): Promise<string[]> {

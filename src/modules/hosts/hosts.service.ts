@@ -1,7 +1,10 @@
+import { Transactional } from '@nestjs-cls/transactional';
+
 import { Injectable, Logger } from '@nestjs/common';
 import { QueryBus } from '@nestjs/cqrs';
 
 import { fail, ok, TResult } from '@common/types';
+import { cloneString } from '@common/utils/clone-string.util';
 import { nullifyEmpty } from '@common/utils/convert-type';
 import { ERRORS } from '@libs/contracts/constants';
 
@@ -281,6 +284,62 @@ export class HostsService {
             this.logger.error(error);
             return fail(ERRORS.GET_ONE_HOST_ERROR);
         }
+    }
+
+    public async cloneHost(cloneFromUuid: string): Promise<TResult<HostsEntity>> {
+        try {
+            return await this.cloneHostTransactional(cloneFromUuid);
+        } catch (error) {
+            this.logger.error(error);
+
+            return fail(ERRORS.CLONE_HOST_ERROR);
+        }
+    }
+
+    @Transactional()
+    private async cloneHostTransactional(cloneFromUuid: string): Promise<TResult<HostsEntity>> {
+        // Read positions after acquiring the lock so concurrent clones/reorders cannot overlap.
+        await this.hostsRepository.lockHostOrder();
+        const host = await this.hostsRepository.findByUUID(cloneFromUuid);
+        if (!host) return fail(ERRORS.HOST_NOT_FOUND);
+        if (!host.configProfileUuid || !host.configProfileInboundUuid) {
+            return fail(ERRORS.CONFIG_PROFILE_NOT_FOUND);
+        }
+
+        await this.hostsRepository.shiftViewPositionsAfter(host.viewPosition);
+
+        const { uuid: _uuid, nodes, internalSquads, ...rest } = host;
+
+        const clone = await this.hostsRepository.create(
+            new HostsEntity({
+                ...rest,
+                remark: cloneString(host.remark),
+                isDisabled: true,
+                viewPosition: host.viewPosition + 1,
+            }),
+        );
+
+        if (nodes.length > 0) {
+            await this.hostsRepository.addNodesToHost(
+                clone.uuid,
+                nodes.map((node) => node.nodeUuid),
+            );
+
+            clone.nodes = nodes;
+        }
+
+        if (internalSquads.length > 0) {
+            await this.hostsRepository.addInternalSquadsToHost(
+                clone.uuid,
+                internalSquads.map((internalSquad) => internalSquad.squadUuid),
+            );
+
+            clone.internalSquads = internalSquads;
+        }
+
+        await this.hostsRepository.syncViewPositionSequence();
+
+        return ok(clone);
     }
 
     public async reorderHosts(dto: ReorderHostsBodyDto): Promise<

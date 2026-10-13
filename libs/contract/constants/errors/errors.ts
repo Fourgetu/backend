@@ -1294,6 +1294,11 @@ export const ERRORS = {
         message: 'Speed limit not found',
         httpCode: 404,
     },
+    CLONE_HOST_ERROR: {
+        code: 'A272',
+        message: 'Clone host error',
+        httpCode: 500,
+    },
     SPEED_LIMIT_NAME_ALREADY_EXISTS: {
         code: 'A259',
         message: 'Speed limit name already exists',
