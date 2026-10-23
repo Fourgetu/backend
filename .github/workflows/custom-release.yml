@@ -12,7 +12,7 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/fourgetu/remnawave-backend
-  FRONTEND_URL: https://github.com/Fourgetu/frontend/releases/download/${{ github.ref_name }}/remnawave-frontend.zip
+  FRONTEND_URL: https://github.com/Fourgetu/frontend/releases/download/custom-v0.2.14/remnawave-frontend.zip
 
 jobs:
   build-and-push:
@@ -41,13 +41,14 @@ jobs:
       - name: Set up supported Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24.20.0'
+          node-version: '24.22.1'
           cache: npm
 
       - name: Test locked dependencies and Host transactions
         env:
           DATABASE_URL: postgresql://clone_test:clone_test@127.0.0.1:5432/clone_test
           HOST_CLONE_TEST_DATABASE_URL: postgresql://clone_test:clone_test@127.0.0.1:5432/clone_test
+          BULK_DELETE_TEST_DATABASE_URL: postgresql://clone_test:clone_test@127.0.0.1:5432/clone_test
         run: |
           npm ci --no-audit --no-fund
           npm run migrate:generate
@@ -55,6 +56,7 @@ jobs:
           npx tsc --noEmit
           npx prisma db push --skip-generate
           npm run test:integration:host-clone
+          npm run test:integration:bulk-delete
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -80,7 +82,7 @@ jobs:
             FRONTEND_URL=${{ env.FRONTEND_URL }}
             __RW_METADATA_VERSION=${{ github.ref_name }}
             __RW_METADATA_GIT_BACKEND_COMMIT=${{ github.sha }}
-            __RW_METADATA_GIT_FRONTEND_COMMIT=${{ github.ref_name }}
+            __RW_METADATA_GIT_FRONTEND_COMMIT=0eb24377726919a20aef2a0e12094b5981e2ee09
             __RW_METADATA_GIT_BRANCH=${{ github.ref_name }}
             __RW_METADATA_BUILD_NUMBER=${{ github.run_number }}
           tags: |
@@ -105,7 +107,7 @@ jobs:
             # Remnawave custom Backend image
 
             - Image: `${{ env.IMAGE_NAME }}:${{ github.ref_name }}`
-            - Frontend asset: `Fourgetu/frontend@${{ github.ref_name }}`
+            - Frontend asset: `Fourgetu/frontend@custom-v0.2.14` (unchanged)
             - Platforms: `linux/amd64`, `linux/arm64`
             - Commit: `${{ github.sha }}`
             - Database migrations run automatically at container startup.
