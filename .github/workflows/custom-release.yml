@@ -12,7 +12,7 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/fourgetu/remnawave-backend
-  FRONTEND_URL: https://github.com/Fourgetu/frontend/releases/download/custom-v0.2.14/remnawave-frontend.zip
+  FRONTEND_URL: https://github.com/Fourgetu/frontend/releases/download/custom-v0.2.16/remnawave-frontend.zip
 
 jobs:
   build-and-push:
@@ -82,7 +82,7 @@ jobs:
             FRONTEND_URL=${{ env.FRONTEND_URL }}
             __RW_METADATA_VERSION=${{ github.ref_name }}
             __RW_METADATA_GIT_BACKEND_COMMIT=${{ github.sha }}
-            __RW_METADATA_GIT_FRONTEND_COMMIT=0eb24377726919a20aef2a0e12094b5981e2ee09
+            __RW_METADATA_GIT_FRONTEND_COMMIT=86225d30669d99a340623fbd28c086a71989a377
             __RW_METADATA_GIT_BRANCH=${{ github.ref_name }}
             __RW_METADATA_BUILD_NUMBER=${{ github.run_number }}
           tags: |
@@ -107,7 +107,8 @@ jobs:
             # Remnawave custom Backend image
 
             - Image: `${{ env.IMAGE_NAME }}:${{ github.ref_name }}`
-            - Frontend asset: `Fourgetu/frontend@custom-v0.2.14` (unchanged)
+            - Frontend asset: `Fourgetu/frontend@custom-v0.2.16` (multi-user GOST route creation)
+            - Node remains `custom-v0.2.15`; this release updates the embedded frontend.
             - Platforms: `linux/amd64`, `linux/arm64`
             - Commit: `${{ github.sha }}`
             - Database migrations run automatically at container startup.
